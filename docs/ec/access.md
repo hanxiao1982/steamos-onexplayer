@@ -13,7 +13,7 @@ Register offsets are in [README.md](README.md). This page is only **how** bytes 
 | `WinRing0` | `1` (default) | `ECWinRing0` | AMD map (X2 Mini PRO, APEX) |
 | `OxpWMI` | `2` | `ECOxpWMI` | Intel G3E map (X2 Mini, X2, OneXPlayer 3, Apex Air, Apex i) |
 
-JS calls `/func/setECAccessType/{type}` after DMI detect. Type `1` also unpacks `wr0_build.7z` (`WinRing0x64.dll` + `.sys`). Type `2` does not load WinRing0.
+JS calls `POST http://localhost:1013/func/setECAccessType/{type}` after DMI detect (or the same path on named pipe `\\.\pipe\CompatLayerCT`; default is pipe). Type `1` also unpacks `wr0_build.7z` (`WinRing0x64.dll` + `.sys`). Type `2` does not load WinRing0. Full route list: [onexconsole-api.md](onexconsole-api.md).
 
 Facade `CompatLayerCT.EC` exposes:
 

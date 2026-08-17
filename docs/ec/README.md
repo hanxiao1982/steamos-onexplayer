@@ -23,11 +23,11 @@ Linux `oxpec` treats X2 Mini PRO as `oxp_fly` for fan/turbo, but still uses char
 
 ## How OneXConsole talks to the EC
 
-See [access.md](access.md) for the two backends and the Linux `oxpec` comparison. Intel G3E WMI vs in-tree MSI Claw (`msi-wmi-platform`): [linux-wmi.md](linux-wmi.md).
+See [access.md](access.md) for the two backends and the Linux `oxpec` comparison. Intel G3E WMI vs in-tree MSI Claw (`msi-wmi-platform`): [linux-wmi.md](linux-wmi.md). Local HTTP/pipe API (port **1013**): [onexconsole-api.md](onexconsole-api.md).
 
 Short version:
 
-1. Electron app (`background.js`) selects the per-model address table.
+1. Electron app (`background.js`) selects the per-model address table and POSTs to CompatLayerCT (`http://localhost:1013` or named pipe `\\.\pipe\CompatLayerCT`).
 2. `CompatLayerCT.exe` performs the read/write.
 3. Backends:
    - **1 = WinRing0** (AMD): `ReadIoPortByte` / `WriteIoPortByte` on 0x66/0x62
@@ -41,5 +41,6 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [x2-mini.md](x2-mini.md) — Intel G3E map (X2 Mini and other G3E products)
 - [x2-mini-pro.md](x2-mini-pro.md) — AMD map (X2 Mini PRO / APEX)
 - [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
+- [onexconsole-api.md](onexconsole-api.md) — localhost:1013 / named-pipe routes (F12 / proxy)
 - [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
 - [maps.yaml](maps.yaml) — machine-readable tables
