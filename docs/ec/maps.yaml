@@ -1,0 +1,64 @@
+# OneXConsole 0.10.2-fix8 EC maps
+# Addresses are 8-bit ACPI EC RAM offsets.
+# Wire format: encoded = 0x400 + offset
+# Fan RPM is 16-bit big-endian at fan_rpm / fan_rpm+1.
+
+encoding:
+  formula: "encoded = 0x400 + ec_reg"
+  command_port: 0x66
+  data_port: 0x62
+
+shared: &shared
+  pwm_enable: 0x4A
+  pwm_enable_auto: 0
+  pwm_enable_manual: 1
+  pwm_duty: 0x4B
+  handle_power: 0x2D
+  handle_power_on: 1
+  handle_power_off: 0
+  handle_power_restore: -1
+  bypass_off: 0
+  bypass_awake: 1
+  bypass_always: 3
+  power_supply_mode: 0xE3
+  board_sensor1: 0x60
+  board_sensor2: 0x61
+  cpu_temp: 0x70
+  battery_temp: 0xA0
+  battery_charge_current: 0xA1
+  set_tdp_able: 0xED
+
+platforms:
+  intel_g3e:
+    doc: x2-mini.md
+    access: oxpwmi
+    ec_access_type: 2
+    tdp_via: intel-msr
+    fan_rpm: 0x58
+    app_fun_en: 0xEB
+    pwm_max: 184
+    charge_limit: 0xA3
+    charge_bypass: 0xA4
+    force_charge_min: 0xA5
+    <<: *shared
+    products:
+      - {id: x2-mini, product: ONEXPLAYER X2Mini, marketing: X2 Mini, tdp: {max: 45, boost: 46, default: 25}}
+      - {id: x2, product: ONEXPLAYER X2, marketing: X2, aliases: [ONEXPLAYER X2 EVA], tdp: {max: 35, boost: 36, unlock: 40, default: 25}}
+      - {id: onexplayer-3, product: ONEXPLAYER 3, marketing: OneXPlayer 3, tdp: {max: 35, boost: 36, unlock: 40, default: 25}}
+      - {id: apex-air, product: ONEXPLAYER Apex Air, marketing: Apex Air, aliases: [ONEXPLAYER Apex i], tdp: {default: 25, plugin: 35, boost_low_sku: 46, boost_high_sku: 66}}
+
+  amd:
+    doc: x2-mini-pro.md
+    access: winring0
+    ec_access_type: 1
+    tdp_via: ryzenadj
+    fan_rpm: 0x76
+    app_fun_en: 0xF1
+    pwm_max: 255
+    charge_limit: 0xE5
+    charge_bypass: 0xE6
+    force_charge_min: 0xE7
+    <<: *shared
+    products:
+      - {id: x2-mini-pro, product: ONEXPLAYER X2Mini PRO, marketing: X2 Mini PRO, tdp: {max: 55, boost: 70, default: 45, dcin_max: 80, cooling_dock: 120}}
+      - {id: apex, product: ONEXPLAYER APEX, marketing: APEX}
