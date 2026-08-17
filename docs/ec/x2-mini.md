@@ -95,10 +95,10 @@ battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 
 `fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2` (fan/charge offsets), **not** `oxp_fly`. Skip `0xEB` on this SKU.
 
-## SteamOS / `oxpec` (X2 Mini)
+## SteamOS / Linux
 
-Use: fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`, optional decode of `0xE3`.
+WMI driver: [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`, optional decode of `0xE3`.
 
 Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
 
-TDP = Intel MSR. RGB / rumble / gyro = HID. 睿频 / CPU 频率 = host power policy, not EC.
+TDP = Intel MSR. RGB / rumble / gyro = HID. 睿频 / CPU 频率 = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).

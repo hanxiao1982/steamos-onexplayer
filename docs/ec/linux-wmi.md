@@ -108,7 +108,7 @@ Not the same ABI. Do **not** bind `msi-wmi-platform` to a OneXPlayer DMI id.
 | Fan | EC `0x58`/`0x59` (BE16 RPM) | `Get_Fan` raw, `480000/raw` |
 | TDP | EC gate `0xED` + Intel MSR | WMI `0x50`/`0x51` watts |
 | Charge | EC `0xA3`–`0xA5` | WMI `0xd7` |
-| In-tree Linux client | **none** | `msi-wmi-platform` |
+| In-tree Linux client | **none** (out-of-tree [`oxp-wmi`](oxp-wmi.md)) | `msi-wmi-platform` |
 | `oxpec` | ACPI `ec_read`/`ec_write` only | not used |
 
 ### GUID is not shared

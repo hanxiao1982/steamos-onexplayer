@@ -36,11 +36,13 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 
 ## Files
 
-- [x2-mini.md](x2-mini.md) — Intel G3E map + **X2 Mini live vs OneXConsole** (approve this first)
+- [x2-mini.md](x2-mini.md) — Intel G3E map + X2 Mini live vs OneXConsole
 - [x2-mini-pro.md](x2-mini-pro.md) — AMD map, source-only (live later)
 - [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
 - [onexconsole-api.md](onexconsole-api.md) — localhost:1013 / named-pipe routes (F12 / proxy)
 - [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
+- [oxp-wmi.md](oxp-wmi.md) — Linux `oxp-wmi` module (X2 Mini WMI control)
+- [../../linux/oxp-wmi/](../../linux/oxp-wmi/) — driver sources
 - [maps.yaml](maps.yaml) — machine-readable tables
 - [charge.md](charge.md) — charge-limit / bypass / force-min ranges and read-only probe
 - [fan.md](fan.md) — fan PWM / RPM read-only probe (X2 Mini)
