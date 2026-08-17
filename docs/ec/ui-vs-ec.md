@@ -8,23 +8,23 @@ Live WMI reads on `ONEXPLAYER X2Mini`.
 
 | UI | EC | Values |
 |---|---|---|
-| 风扇自动 / 预设 1 / 预设 2 | `0x4A` | `0` auto, `1` manual. Profiles 1 and 2 are both manual. |
-| 风扇百分比 | `0x4B` | Raw 0–184; UI % = `4B×100/184` |
-| 风扇 RPM | `0x58`/`0x59` | BE16 |
-| CPU 温度 | `0x70` | °C |
-| 充电上限 | `0xA3` | UI 50–100 step 5 |
-| 旁路供电 | `0xA4` | `0` / `1` / `3` |
-| 供电模式文案 | `0xE3` | **Live bitfield** (see below). Status only, not a toggle. |
+| Fan auto / preset 1 / preset 2 | `0x4A` | `0` auto, `1` manual. Profiles 1 and 2 are both manual. |
+| Fan percent | `0x4B` | Raw 0–184; UI % = `4B×100/184` |
+| Fan RPM | `0x58`/`0x59` | BE16 |
+| CPU temperature | `0x70` | °C |
+| Charge limit | `0xA3` | UI 50–100 step 5 |
+| Charge bypass | `0xA4` | `0` / `1` / `3` |
+| Power-supply mode label | `0xE3` | **Live bitfield** (see below). Status only, not a toggle. |
 
 ## Not EC (UI goes elsewhere)
 
 | UI | Path |
 |---|---|
-| TDP / 性能瓦数 / PL4 | Intel MSR (`/msr/setCpuPl`, `setCpuPl4`). `0xED` stays `0`. |
-| CPU 睿频 / 频率 | `/powerplan/…` — does not change `0xEB` |
-| RGB / 震动 / 陀螺仪 / 键位 | HID |
-| 亮度、刷新率、音量 | Windows |
-| 手柄插拔 | Not `0x2D` (that byte stays `0`). Presence is HID. |
+| TDP / performance watts / PL4 | Intel MSR (`/msr/setCpuPl`, `setCpuPl4`). `0xED` stays `0`. |
+| CPU turbo / clock | `/powerplan/…` — does not change `0xEB` |
+| RGB / rumble / gyro / key mapping | HID |
+| Brightness, refresh rate, volume | Windows |
+| Handle plug/unplug | Not `0x2D` (that byte stays `0`). Presence is HID. |
 
 ## Ignore on X2 Mini
 
@@ -55,7 +55,7 @@ Default `adjustMaxTdpMap` keys (pairs share one icon / `msgKey`). Formula: `adap
 
 | Key | Binary | oxp UI |
 |---|---|---|
-| 1 | `0000_0001` | 电池供电 |
+| 1 | `0000_0001` | Battery power |
 | 2 | `0000_0010` | TypeC ≥100W, no battery |
 | 3 | `0000_0011` | TypeC ≥100W + battery |
 | 4 | `0000_0100` | DC-in / ≥140W, no battery |

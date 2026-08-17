@@ -13,4 +13,6 @@ Two platforms, two maps:
 - [docs/ec/README.md](docs/ec/README.md) — merged platform table
 - [docs/ec/access.md](docs/ec/access.md) — WinRing0 vs OxpWMI vs Linux oxpec
 - [docs/ec/linux-wmi.md](docs/ec/linux-wmi.md) — kernel WMI / MSI Claw G3E vs OxpWMI
+- [docs/ec/oxp-wmi.md](docs/ec/oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer Intel / OxpWMI)
+- [linux/oxp-wmi/](linux/oxp-wmi/) — out-of-tree driver (modeled on `msi-wmi-platform`)
 - [docs/ec/maps.yaml](docs/ec/maps.yaml) — machine-readable tables
