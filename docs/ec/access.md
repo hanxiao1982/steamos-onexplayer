@@ -79,11 +79,14 @@ WMI, not port I/O.
 |---|---|
 | Scope | `root\WMI` (`\\.\root\wmi`) |
 | Class | `SuRwECRegInterface` (`SELECT * FROM SuRwECRegInterface`) |
+| GUID | `43B5A593-AD62-4257-8546-91B0797BEC1B` (X2 Mini class qualifier) |
 | Read | `ReadECReg` in-param `GroupOffset` |
 | Write | `WriteECReg` in-param `GroupOffsetValue` |
-| Out fields seen | `uStringReturn`, `ReturnValue`, `Result`, `Data`, `Status` |
+| Out fields seen | `uStringReturn` (8 bytes), `ReturnValue` |
 
-`GroupOffset` is the 16-bit encoded address (`0x4xx`). Read result is parsed as hex (`^[0-9A-F]{16}$` → 8 bytes); the needed byte is taken from that block.
+`GroupOffset` is the 16-bit encoded address (`0x4xx`). Read result is an 8-byte block (`uStringReturn`; OneXConsole also accepts `^[0-9A-F]{16}$`). The register byte is taken from that block (first byte is the working hypothesis).
+
+X2 Mini probe: `ReadECReg(0x458)` → `ReturnValue=True`, `uStringReturn=0xFF,0x00,…`. Method path is live; `0xFF` at fan high is not yet a validated RPM. See [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini).
 
 Generic WMI helper errors mention `outParams["Data"]`, `dataOut["Bytes"]`, `iDataBlockIndex`, `fullPackage` — a shared ACPI-WMI invoker, not a second EC protocol.
 

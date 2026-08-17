@@ -100,7 +100,7 @@ Not the same ABI. Do **not** bind `msi-wmi-platform` to a OneXPlayer DMI id.
 |---|---|---|
 | Windows class | `SuRwECRegInterface` | `MSI_ACPI` |
 | Scope | `root\WMI` | `root\WMI` |
-| GUID | **unknown** (not in OneXConsole strings; dump bmof on device) | `ABBC0F6E-8EA1-11D1-00A0-C90629100000` |
+| GUID | `43B5A593-AD62-4257-8546-91B0797BEC1B` (X2 Mini Windows `guid` qualifier) | `ABBC0F6E-8EA1-11D1-00A0-C90629100000` |
 | Read | `ReadECReg(GroupOffset)` | `Get_Data` / `Get_Fan` / … |
 | Write | `WriteECReg(GroupOffsetValue)` | `Set_Data` / `Set_Fan` / … |
 | Address | 16-bit `0x400 + reg` (group `0x04`) | 8-bit `buffer[0]` (or fan subfeature) |
@@ -113,15 +113,29 @@ Not the same ABI. Do **not** bind `msi-wmi-platform` to a OneXPlayer DMI id.
 
 ### GUID is not shared
 
-`msi-wmi-platform` DMI-whitelists Micro-Star only, because that Microsoft sample GUID is not unique. OneXConsole never mentions `ABBC0F6E` or `MSI_ACPI`. Until a G3E OneXPlayer dumps `_WDG` / bmof, assume a **different** GUID and method IDs even though the Windows class is also under `root\WMI`.
+Confirmed on X2 Mini (Windows `Get-CimClass` qualifier `guid`):
 
-If a dump ever shows `ABBC0F6E` plus `ReadECReg`, that would be the sample GUID with a different MOF. Still a new driver (or a carefully isolated quirk), not a DMI row in the MSI module.
+`43B5A593-AD62-4257-8546-91B0797BEC1B`
+
+That is **not** the MSI/Microsoft sample `ABBC0F6E-…`. `msi-wmi-platform` must not bind to OneXPlayer. Linux `wmi_device_id` should use the 43B5… GUID (uppercase). Still need `WmiMethodId` for `ReadECReg` / `WriteECReg` from `CimClassMethods` or `bmf2mof`.
+
+### Windows probe (X2 Mini)
+
+`ReadECReg` with `GroupOffset = 0x458` (`0x400 + 0x58` fan high) returned `ReturnValue = True` and
+
+```
+uStringReturn = 0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+```
+
+That matches the 8-byte block OneXConsole parses. **`ReturnValue True` only means the WMI method ran**, not that `0xFF` is a real RPM. `0xFF00` is not a plausible fan speed; `0xFF` is also the usual “empty / unused / not updating” EC value.
+
+Treat the first byte as a candidate for register `0x58` until more offsets are sampled. Cross-check with values that should not be `0xFF` on a running unit: `0x470` (CPU temp), `0x44A`/`0x44B` (PWM), `0x459` (fan low). If those are also all `0xFF`, the bank/offset packing is wrong; if they look like °C / 0–184, the path is good and fan high is just idle/invalid.
 
 ## What to reuse for an OxpWMI Linux backend
 
 Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
-1. `struct wmi_driver` + `wmi_device_id` GUID from the OneXPlayer bmof.
+1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
 2. `wmidev_evaluate_method(wdev, instance, method_id, in, out)` with a driver mutex.
 3. Map OneXConsole `ReadECReg` / `WriteECReg` onto those method IDs and the 16-bit `GroupOffset` (`0x400 + reg`).
 4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, `0xEB` turbo, PWM 0–184, charge `0xA3`–`0xA5`).
@@ -133,7 +147,7 @@ Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
 `bmfdec` 输出乱码**不能**用来排除某个 GUID。多数 `/sys/bus/wmi/devices/<GUID>/` 根本不是 MOF：对它们跑解码器只会得到二进制垃圾。GUID 对不对，看 **类名 / 方法名 / AML 是否碰 EC**，不看解码器是否漂亮。
 
-判定顺序：Windows 类限定符 → 只解码 BMOF 那个 GUID → ACPI `_WDG` + `WMxx` → 只读试读风扇寄存器。
+判定顺序：Windows 类限定符（X2 Mini 已得到 `43B5A593-…`）→ 只解码 BMOF 那个 GUID → ACPI `_WDG` + `WMxx` → 只读交叉验证多个寄存器，不要只看风扇 `0xFF`。
 
 ### 0. 先分清两种 GUID
 
