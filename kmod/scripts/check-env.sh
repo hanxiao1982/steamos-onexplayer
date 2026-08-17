@@ -224,18 +224,63 @@ else
   fi
 fi
 
-# --- Secure Boot (unsigned local .ko) ---
+kconfig_val() {
+  local key="$1" line=""
+  if [[ -r "/lib/modules/${KREL}/config" ]]; then
+    line="$(grep -E "^${key}=" "/lib/modules/${KREL}/config" || true)"
+  elif [[ -r /proc/config.gz ]]; then
+    line="$(zgrep -E "^${key}=" /proc/config.gz || true)"
+  elif [[ -r "${KDIR}/.config" ]]; then
+    line="$(grep -E "^${key}=" "${KDIR}/.config" || true)"
+  fi
+  printf '%s' "${line#${key}=}"
+}
+
+# --- signing: unsigned out-of-tree .ko vs running kernel ---
+# Compiling only oxpec.ko does not inherit the distro kernel's signature.
+sig="$(kconfig_val CONFIG_MODULE_SIG)"
+sig_force="$(kconfig_val CONFIG_MODULE_SIG_FORCE)"
+sig_all="$(kconfig_val CONFIG_MODULE_SIG_ALL)"
+if [[ -n "$sig" || -n "$sig_force" ]]; then
+  ok "MODULE_SIG" "CONFIG_MODULE_SIG=${sig:-n} FORCE=${sig_force:-n} ALL=${sig_all:-n}"
+fi
+if [[ "$sig_force" == y ]]; then
+  fail "模块强制签名" "CONFIG_MODULE_SIG_FORCE=y：未签名 .ko 即使关掉 Secure Boot 也会被拒"
+  note "只能用内核信任的密钥签名 oxpec.ko，或换不带 FORCE 的内核"
+fi
+
+sb_on=0
 if has_cmd mokutil; then
   sb="$(mokutil --sb-state 2>/dev/null | head -n1 || true)"
   if printf '%s' "$sb" | grep -qi 'SecureBoot enabled'; then
+    sb_on=1
     fail "Secure Boot" "${sb}"
-    note "未签名 oxpec.ko 会被拒。固件里关掉 SB，或自签 MOK（ujust enroll-secure-boot-key 签不了你的模块）"
+    note "只编 oxpec.ko 不会带发行版签名。SB 开启时 insmod 报 Key was rejected / Required key not available"
+    note "处理：固件关 SB，或用自己的 MOK 签名（ujust enroll-secure-boot-key 只登记发行版密钥，签不了你的 .ko）"
   else
     ok "Secure Boot" "${sb:-disabled / unknown}"
+    if [[ "$sig" == y && "$sig_force" != y ]]; then
+      ok "未签名模块" "SB 已关且未 FORCE，本地编的 oxpec.ko 可以 insmod"
+    fi
   fi
 else
-  warn "Secure Boot" "没有 mokutil，无法探测；若固件开了 SB，insmod 仍会失败"
+  warn "Secure Boot" "没有 mokutil，无法探测；若固件开了 SB，未签名 .ko 会被拒"
 fi
+
+for ko in "${ROOT:+${ROOT}/kmod/oxpec/oxpec.ko}" /var/lib/oxp-kmod/oxpec.ko; do
+  [[ -n "$ko" && -f "$ko" ]] || continue
+  signer="$(modinfo -F signer "$ko" 2>/dev/null || true)"
+  if [[ -n "$signer" ]]; then
+    ok "已有 .ko 签名" "$(basename "$ko"): signer=${signer}"
+  else
+    if [[ "$sb_on" -eq 1 || "$sig_force" == y ]]; then
+      warn "已有 .ko 签名" "$(basename "$ko"): 无 signer（当前策略会拒收）"
+    else
+      ok "已有 .ko 签名" "$(basename "$ko"): 未签名（当前策略允许）"
+    fi
+  fi
+  break
+done
 
 # --- sudo ---
 if [[ "${EUID}" -eq 0 ]]; then
@@ -264,17 +309,12 @@ else
 fi
 
 # --- in-tree oxpec ---
-oxpec_cfg=""
-if [[ -r /lib/modules/${KREL}/config ]]; then
-  oxpec_cfg="$(grep -E '^CONFIG_OXPEC=' "/lib/modules/${KREL}/config" || true)"
-elif [[ -r /proc/config.gz ]]; then
-  oxpec_cfg="$(zgrep -E '^CONFIG_OXPEC=' /proc/config.gz || true)"
-fi
-if [[ "$oxpec_cfg" == *=y ]]; then
-  warn "CONFIG_OXPEC" "${oxpec_cfg}（编进内核，树外 .ko 换不掉）"
+oxpec_cfg="$(kconfig_val CONFIG_OXPEC)"
+if [[ "$oxpec_cfg" == y ]]; then
+  warn "CONFIG_OXPEC" "CONFIG_OXPEC=y（编进内核，树外 .ko 换不掉）"
   note "只能走重编发行版内核；DMI-only 机型一般是 =m"
 elif [[ -n "$oxpec_cfg" ]]; then
-  ok "CONFIG_OXPEC" "$oxpec_cfg"
+  ok "CONFIG_OXPEC" "CONFIG_OXPEC=${oxpec_cfg}"
 fi
 
 if [[ -e /var/lib/oxp-kmod/oxpec.ko ]]; then

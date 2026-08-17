@@ -83,7 +83,7 @@ kmod/scripts/ssh-handheld.sh "$H" pull-devices
 | 子命令 | 做什么 |
 | --- | --- |
 | `push` | 把仓库拷到掌机 `~/steamos-onexplayer`（不含 `.git`、不含已编的 `.ko`） |
-| `check` / `status` | SSH 进去后跑 `check-env.sh`：发行版、DMI、python、curl/GitHub、make/gcc 或 clang、内核头文件、pahole、Secure Boot、sudo、InputPlumber |
+| `check` / `status` | SSH 进去后跑 `check-env.sh`：发行版、DMI、工具链、内核头文件、`CONFIG_MODULE_SIG*`、Secure Boot、sudo、InputPlumber |
 | `collect` | 先 `--collect-only` 检查，再远程 `collect-dmi.sh`（默认 `--add`） |
 | `install` | 先完整环境检查，再 `sudo on-device-install.sh` |
 | `pull-devices` | 把掌机上的 `kmod/devices/*.env` 拉回电脑，和其它型号放一起 |

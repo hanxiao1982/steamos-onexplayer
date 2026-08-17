@@ -208,6 +208,32 @@ zgrep CONFIG_OXPEC /proc/config.gz
 
 `=m` 才能替换。
 
+### 签名会不会让「只编一个模块」装不上现有内核？
+
+**会，但这和「只编 oxpec、不重编整核」没有直接关系。** 树外 `oxpec.ko` 默认**没有**发行版内核那套签名；现有内核该不该收它，看两道互相独立的门：
+
+| 门槛 | 卡的是什么 | 典型报错 | 和「只编一个模块」的关系 |
+| --- | --- | --- | --- |
+| **vermagic** | `.ko` 必须对着**正在跑的** `uname -r` 头文件编 | `Invalid module format` | 只编模块反而正确：不要用另一台机器/另一个 kernel-devel 的产物 |
+| **签名** | Secure Boot 开启，或 `CONFIG_MODULE_SIG_FORCE=y` | `Key was rejected by service` / `Required key not available` | 发行版自带的 `oxpec.ko` 随内核 RPM 签过名；你本地 `make` 出来的那份不会自动带上这把钥匙 |
+
+常见组合：
+
+- **CachyOS，Secure Boot 关着，且没有 FORCE**：未签名的本地 `.ko` 可以 `insmod`。这是最省事的路径。
+- **Bazzite 默认开 Secure Boot**：未签名模块会被拒。`ujust enroll-secure-boot-key` 只登记 Universal Blue 的密钥，**不会**让你的 `oxpec.ko` 通过。
+- **`CONFIG_MODULE_SIG=y` 但 FORCE 未开、SB 已关**：内核「会签名官方模块」，但仍允许未签名的树外模块。只编 `oxpec` 没问题。
+- **`CONFIG_MODULE_SIG_FORCE=y`**：关 SB 也不行，必须用内核信任的密钥签这个 `.ko`。
+
+`check-env.sh` / `ssh-handheld.sh check` 会读 `CONFIG_MODULE_SIG*` 和 `mokutil --sb-state`。Bazzite 上开着 SB 会直接 `[FAIL]`。
+
+要过签名门，三选一（从省事到重）：
+
+1. 固件里关掉 Secure Boot（本地适配推荐）
+2. 自己生成 MOK，用内核树里的 `scripts/sign-file` 签 `oxpec.ko`，再 `mokutil --import` 登记（不是 ujust 那把发行版钥匙）
+3. 把 DMI 打进 OGC / CachyOS 官方内核，用他们签过名的模块，不再树外加载
+
+签名过不了时，**重编整核也不会自动解决**——整核 RPM 同样要按发行版流程签名。只编模块不是根因。
+
 ---
 
 ## 5. 本地部署（开机自动加载）

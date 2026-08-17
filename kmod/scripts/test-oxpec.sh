@@ -45,8 +45,8 @@ echo "== load =="
 modprobe -r oxpec 2>/dev/null || true
 if ! insmod "${KO}"; then
   echo "insmod failed. Common causes:" >&2
-  echo "  - vermagic mismatch (rebuild against this kernel)" >&2
-  echo "  - Secure Boot refusing unsigned module (disable SB or sign with MOK)" >&2
+  echo "  - vermagic mismatch (rebuild against THIS kernel's headers; not a signing issue)" >&2
+  echo "  - unsigned .ko rejected: Secure Boot on, or CONFIG_MODULE_SIG_FORCE=y" >&2
   echo "  - in-tree oxpec is built-in (=y), cannot replace without a full kernel" >&2
   dmesg | tail -n 30
   exit 1
