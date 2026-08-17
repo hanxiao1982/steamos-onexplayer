@@ -41,7 +41,7 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
 - [onexconsole-api.md](onexconsole-api.md) — localhost:1013 / named-pipe routes (F12 / proxy)
 - [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
-- [oxp-wmi.md](oxp-wmi.md) — Linux `oxp-wmi` module (X2 Mini WMI control)
+- [oxp-wmi.md](oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer G3E)
 - [../../linux/oxp-wmi/](../../linux/oxp-wmi/) — driver sources
 - [maps.yaml](maps.yaml) — machine-readable tables
 - [charge.md](charge.md) — charge-limit / bypass / force-min ranges and read-only probe

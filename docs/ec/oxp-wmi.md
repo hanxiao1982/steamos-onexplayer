@@ -1,8 +1,10 @@
-# oxp-wmi — Linux WMI client for X2 Mini
+# oxp-wmi — Linux WMI client for OneXPlayer G3E
 
 Out-of-tree module: [`linux/oxp-wmi/`](../../linux/oxp-wmi/).
 
 Same *shape* as in-tree `msi-wmi-platform` (Claw G3E): `struct wmi_driver`, mutex around `wmidev_evaluate_method()`, hwmon, debugfs. Different GUID, methods, and buffer layout. Do **not** bind the MSI GUID.
+
+For every OneXPlayer handheld on the Intel Arc G3 Extreme (G3E) / OxpWMI map. AMD boards (WinRing0) stay on `oxpec`.
 
 Register map: [x2-mini.md](x2-mini.md). Protocol: [linux-wmi.md](linux-wmi.md), [access.md](access.md).
 
@@ -18,7 +20,7 @@ Register map: [x2-mini.md](x2-mini.md). Protocol: [linux-wmi.md](linux-wmi.md), 
 | `charge_behaviour` | `0xA4` | `auto` / `inhibit-charge-awake` / `inhibit-charge` → 0 / 1 / 3 |
 | `power_supply_mode` | `0xE3` | read-only; prints raw + oxp-normalized key |
 
-Not implemented (live unused or not EC): `0xEB`, `0x2D`, `0xED`, `0xA5`, board temps, TDP, RGB.
+Not implemented (unused on the G3E map, or not EC): `0xEB`, `0x2D`, `0xED`, `0xA5`, board temps, TDP, RGB.
 
 ## Build / load
 
@@ -31,7 +33,7 @@ sudo insmod oxp-wmi.ko
 # or: sudo insmod oxp-wmi.ko force=1   # skip DMI / probe-read checks
 ```
 
-DMI whitelist: `Manufacturer` contains `ONE-NETBOOK` and `Product` is `ONEXPLAYER X2Mini` (also X2 / X2 EVA / 3 / Apex Air / Apex i). X2 Mini PRO is AMD — use `oxpec`, not this module.
+DMI whitelist: `Manufacturer` / `Board Vendor` contains `ONE-NETBOOK`, plus the G3E `Product` names OneXConsole sets to `ecAccessType=2` (X2 Mini, X2, X2 EVA, OneXPlayer 3, Apex Air, Apex i). AMD SKUs are not in this list.
 
 ## Check
 

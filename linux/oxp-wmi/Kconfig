@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 config OXP_WMI
-	tristate "OneXPlayer OxpWMI EC (X2 Mini / Intel G3E)"
+	tristate "OneXPlayer G3E OxpWMI EC"
 	depends on ACPI_WMI
 	depends on HWMON
 	depends on DMI
 	help
-	  WMI client for OneXPlayer Intel Arc G3 Extreme handhelds
-	  (ONEXPLAYER X2Mini and other G3E SKUs that use SuRwECRegInterface).
+	  WMI client for OneXPlayer Intel Arc G3 Extreme (G3E) handhelds
+	  that use SuRwECRegInterface (ecAccessType=2).
 
 	  Talks to GUID 43B5A593-AD62-4257-8546-91B0797BEC1B the same way
 	  msi-wmi-platform talks to the MSI Claw GUID: wmidev_evaluate_method
 	  plus a driver mutex. Exposes fan/PWM/CPU temp via hwmon and
 	  charge limit / bypass via sysfs.
 
-	  Do not enable this on X2 Mini PRO (AMD / WinRing0 / oxpec).
+	  Do not enable this on AMD / WinRing0 boards (oxpec).
 
 	  If unsure, say N.

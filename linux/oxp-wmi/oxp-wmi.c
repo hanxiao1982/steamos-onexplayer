@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * OneXPlayer OxpWMI (SuRwECRegInterface) — Intel Arc G3 Extreme / X2 Mini.
+ * OneXPlayer G3E OxpWMI (SuRwECRegInterface).
  *
  * Call pattern copied from msi-wmi-platform: wmi_driver + mutex around
  * wmidev_evaluate_method() + hwmon + debugfs. The ABI is not MSI's:
@@ -14,7 +14,8 @@
  *   Output byte[0] = 0x00 ok / 0xFF fail (opposite of msi-wmi-platform)
  *          byte[1] = EC RAM value
  *
- * Live-verified on ONEXPLAYER X2Mini. Do not bind the MSI GUID.
+ * For all OneXPlayer Intel Arc G3 Extreme handhelds that use OxpWMI.
+ * Do not bind the MSI GUID. Not for AMD / WinRing0 boards.
  *
  * Copyright (C) 2026
  */
@@ -35,7 +36,7 @@
 
 #define DRIVER_NAME		"oxp-wmi"
 
-/* Windows class SuRwECRegInterface, X2 Mini guid qualifier */
+/* Windows class SuRwECRegInterface, G3E guid qualifier */
 #define OXP_WMI_GUID		"43B5A593-AD62-4257-8546-91B0797BEC1B"
 
 #define OXP_WMI_GROUP		0x04
@@ -46,7 +47,7 @@ enum oxp_wmi_method {
 	OXP_WMI_WRITE_READ_EC	= 3,
 };
 
-/* X2 Mini live map — implement these */
+/* G3E EC map (OneXConsole intel_g3e / OxpWMI) */
 #define OXP_REG_PWM_ENABLE	0x4A
 #define OXP_REG_PWM_DUTY	0x4B
 #define OXP_REG_FAN_H		0x58
@@ -630,8 +631,7 @@ static struct wmi_driver oxp_wmi_driver = {
 };
 
 /*
- * OneXConsole DMI Product names that force ecAccessType=2 (OxpWMI).
- * Only X2 Mini has live reads; the others share the same address table.
+ * OneXConsole DMI Product names that force ecAccessType=2 (OxpWMI / G3E).
  */
 static const struct dmi_system_id oxp_wmi_dmi_table[] __initconst = {
 	{
@@ -700,6 +700,6 @@ module_init(oxp_wmi_init);
 module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
-MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (X2 Mini / Intel G3E)");
+MODULE_DESCRIPTION("OneXPlayer G3E OxpWMI EC access");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);

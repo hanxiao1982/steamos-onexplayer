@@ -4,7 +4,7 @@
 OneXPlayer OxpWMI (SuRwECRegInterface)
 ====================================================
 
-The Intel Arc G3 Extreme OneXPlayer handhelds (X2 Mini and siblings) expose
+OneXPlayer G3E handhelds (Intel Arc G3 Extreme, OxpWMI) expose
 EC RAM through ACPI-WMI, not through the ACPI Embedded Controller address
 space that ``oxpec`` uses on AMD boards.
 

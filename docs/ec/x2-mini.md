@@ -97,7 +97,7 @@ battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 
 ## SteamOS / Linux
 
-WMI driver: [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`, optional decode of `0xE3`.
+WMI driver for the G3E platform: [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`, optional decode of `0xE3`.
 
 Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
 
