@@ -23,19 +23,16 @@ Linux `oxpec` treats X2 Mini PRO as `oxp_fly` for fan/turbo, but still uses char
 
 ## How OneXConsole talks to the EC
 
+See [access.md](access.md) for the two backends and the Linux `oxpec` comparison.
+
+Short version:
+
 1. Electron app (`background.js`) selects the per-model address table.
 2. `CompatLayerCT.exe` performs the read/write.
 3. Backends:
-   - **1 = WinRing0** (AMD): `WinRing0x64.sys` port I/O
-   - **2 = OxpWMI** (Intel G3E): `ECOxpWMI`
-4. ACPI EC ports: command/status `0x66`, data `0x62`
-
-Address encoding in the app:
-
-```
-encoded = 0x400 + ec_reg
-ec_reg  = encoded & 0xFF
-```
+   - **1 = WinRing0** (AMD): `ReadIoPortByte` / `WriteIoPortByte` on 0x66/0x62
+   - **2 = OxpWMI** (Intel G3E): WMI `SuRwECRegInterface` (`ReadECReg` / `WriteECReg`)
+4. App addresses are `0x400 + ec_reg`. WinRing0 uses the low 8 bits; WMI uses the full 16-bit `GroupOffset`.
 
 Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `oxpec`.
 
@@ -43,4 +40,5 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 
 - [x2-mini.md](x2-mini.md) — Intel G3E map (X2 Mini and other G3E products)
 - [x2-mini-pro.md](x2-mini-pro.md) — AMD map (X2 Mini PRO / APEX)
+- [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
 - [maps.yaml](maps.yaml) — machine-readable tables
