@@ -7,14 +7,16 @@
 两边都不是自己维护一份独立的 `oxp.ko` 源码树。风扇 / EC 走主线 `oxpec`，按键 / RGB / 手柄配置走主线 `hid-oxp`。发行版只是：
 
 1. 用比主线更新的 DMI 条目或 quirk 做 backport
-2. 再叠一层用户态（HHD 或 InputPlumber）做 TDP、风扇曲线、按键映射
+2. 再叠一层用户态做按键映射、TDP、风扇曲线
 
-| 功能 | 内核模块 | 主线源文件 | 用户态 |
+**只适配这两个系统的最新版本时，可以不改 HHD。** 按键映射只走 InputPlumber。TDP / 风扇不在 InputPlumber 里，走 PowerStation + steamos-manager，外加内核 `oxpec` 的 hwmon。详见 [第 4 节](#4-用户态只适配最新版可以不改-hhd)。
+
+| 功能 | 内核模块 | 主线源文件 | 最新版用户态（不要再写 HHD） |
 | --- | --- | --- | --- |
-| 风扇、EC PWM、Turbo 接管、充电限制 | `oxpec`（旧名 `oxp-sensors`） | `drivers/platform/x86/oxpec.c` | HHD / PowerControl 读 hwmon |
-| RGB、手柄模式、硬件级按键映射 | `hid-oxp` | `drivers/hid/hid-oxp.c` | HHD HID / InputPlumber |
-| TDP | 一般不在 `oxpec` 里 | AMD: `amd_pstate` / SMU；部分机型 `acpi_call` | HHD Adjustor（已并入 hhd v4） |
-| 手柄/快捷键映射 | `hid-oxp` + evdev | 同上 | HHD `device/oxp/` 或 InputPlumber YAML |
+| 风扇、EC PWM、Turbo 接管、充电限制 | `oxpec`（旧名 `oxp-sensors`） | `drivers/platform/x86/oxpec.c` | `oxpec` hwmon；Steam UI 经 steamos-manager `FanControl1` |
+| RGB、手柄模式、硬件级按键映射 | `hid-oxp` | `drivers/hid/hid-oxp.c` | InputPlumber + 可选 `hid-oxp` sysfs |
+| TDP | 一般不在 `oxpec` 里 | AMD: `amd_pstate` / SMU；部分机型 `acpi_call` | PowerStation + steamos-manager `TdpLimit1` |
+| 手柄/快捷键映射 | `hid-oxp` + evdev | 同上 | InputPlumber `50-onexplayer_*.yaml` |
 
 新机最常见的内核改动就是：在 `oxpec.c` 的 `dmi_table[]` 里加一条 `DMI_BOARD_NAME`，并把它绑到已有 board 变体（`oxp_fly` / `oxp_x1` / `oxp_2` 等）。APEX 就是这样绑到 `oxp_fly` 的。
 
@@ -306,52 +308,88 @@ sudo pacman -U linux-cachyos-deckify-*.pkg.tar.zst
 
 ---
 
-## 4. 用户态：TDP / 风扇曲线 / 按键映射不在内核里做完
+## 4. 用户态：只适配最新版可以不改 HHD
 
-内核 `oxpec` 只提供 hwmon PWM 和少量 EC 属性。TDP、风扇曲线、Steam 键 / 背键映射在用户态。Bazzite 正在从 HHD 迁到 InputPlumber；CachyOS Handheld Edition 默认就是 InputPlumber。两边都要改对应项目，否则内核 DMI 加上了，Game Mode 里仍然没有完整功能。
+内核 `oxpec` 只提供 hwmon PWM 和少量 EC 属性。按键、TDP、风扇曲线仍要用户态。两边最新官方栈已经不用 HHD。
 
-### 4.1 Handheld Daemon（Bazzite 传统栈）
+### 4.1 结论：可以跳过 HHD，但不能只改 InputPlumber
 
-仓库：<https://github.com/hhd-dev/hhd>
+| 问题 | 答案 |
+| --- | --- |
+| 最新 Bazzite / CachyOS Handheld 还默认装 HHD 吗？ | **不装。** 可以不为这两个系统写 HHD `const.py`。 |
+| 按键 / 背键 / 快捷键 / 手柄模拟只改 InputPlumber 够吗？ | **够。** 这是官方输入栈。 |
+| TDP / 风扇曲线只改 InputPlumber 够吗？ | **不够。** InputPlumber 不管功耗和风扇。 |
 
-```
-src/hhd/device/oxp/
-├── __init__.py          # DMI product_name 探测
-├── const.py             # CONFS：机型 → 协议 / RGB / Turbo / IMU
-├── base.py              # 控制器主循环
-├── hid_v1.py / hid_v2.py
-├── serial.py
-└── controllers.yml
-```
+HHD 现在只是可选回退：CachyOS 仓库里还有 `hhd` 包，和 InputPlumber 会抢手柄，官方镜像不会自动启用。旧文档（`docs.bazzite.gg` 掌机页、`CachyOS-Handheld` README 里 Legion 仍写 HHD）已经过时，以镜像和 chwd 实际安装的包为准。
 
-探测读的是 `/sys/devices/virtual/dmi/id/product_name`（注意：和 `oxpec` 用的 `board_name` 可能不同）。
+### 4.2 查证：两边最新镜像装的是什么
 
-`const.py` 的 `CONFS` 决定：
+**Bazzite**
 
-- `protocol`：`hid_v1` / `hid_v2` / `serial` / `mixed` / `none` / `hid_v1_g1` …
-- `turbo`：是否接管 Turbo 键（Intel 机常关掉，留给 TDP）
-- `mapping`：IMU 安装矩阵
-- `rgb` / `extra_buttons`
+- 2026-01 官方公告（[A brighter future for Bazzite](https://universal-blue.discourse.group/t/a-brighter-future-for-bazzite/11575)）：HHD 不再更新，改用 InputPlumber，与 SteamOS / ChimeraOS / Nobara / CachyOS Handheld 对齐。原因包括 HHD 维护者已离开项目，Bazzite 当时是唯一还在发 HHD 的发行版。
+- 2026-03-16 合入 [ublue-os/bazzite `ce953e4`](https://github.com/ublue-os/bazzite/commit/ce953e4306f2effa58f2fbb8a833081685aa5424)：从镜像去掉 HHD 服务、polkit、COPR，改装 InputPlumber / OpenGamepadUI / PowerStation。
+- 当前 `main` 的 `Containerfile` 掌机包是 `inputplumber`、`steamos-manager-powerstation`、`steamos-manager-powerstation-gamescope-session-plus`，并 `systemctl enable inputplumber.service` 与 `steamos-manager.service`。没有 `hhd`。
+- testing 镜像（例如 `testing-44.20260807`）包列表是 InputPlumber 0.78 + PowerStation，没有 HHD。
 
-TDP 插件 Adjustor 已并入 hhd v4，旧仓 [hhd-dev/adjustor](https://github.com/hhd-dev/adjustor) 已归档。
+**CachyOS Handheld**
 
-### 4.2 InputPlumber（CachyOS / 未来 Bazzite）
+- 2026-01 发行说明：硬件探测从 HHD 换成 `steamos-manager` + `inputplumber`。
+- 当前 [chwd `profiles/pci/handhelds/profiles.toml`](https://github.com/CachyOS/chwd/blob/master/profiles/pci/handhelds/profiles.toml) 通用掌机配置：
+
+  ```toml
+  packages = 'steamos-manager inputplumber steamos-powerbuttond'
+  ```
+
+  没有 `hhd`。`hwd_product_name_pattern` 已覆盖一批 OXP / AOKZOE 的 `product_name`（`ONE XPLAYER`、`ONEXPLAYER F1*`、`X1*`、`G1*` 等）。新机若不在这个正则里，安装器不会自动装这组包。
+- `CachyOS-Handheld` README 仍写 Legion 默认 HHD，与当前 chwd 不符，以 chwd 为准。
+- 仓库里仍有 `hhd` 包（例如 4.1.8），只供用户手动装；和 InputPlumber 互斥。
+
+### 4.3 按键映射：只走 InputPlumber
 
 仓库：<https://github.com/ShadowBlip/InputPlumber>
 
 ```
 rootfs/usr/share/inputplumber/devices/50-onexplayer_*.yaml
 rootfs/usr/share/inputplumber/capability_maps/onexplayer_type*.yaml
+rootfs/usr/lib/udev/hwdb.d/60-inputplumber-autostart.hwdb
 src/drivers/oxp_hid/          # HID 厂商报告（背键 M1/M2 等）
 src/drivers/oxp_tty/          # 串口协议
 src/input/source/hidraw/oxp_hid.rs
 ```
 
-已有配置包括 `50-onexplayer_x1.yaml`、`50-onexplayer_apex.yaml` 等。新机通常是复制一份 YAML，改 DMI 匹配和 capability map。
+已有设备 YAML：
 
-### 4.3 两套用户态不要同时抢设备
+- `50-onexplayer_amd.yaml` / `50-onexplayer_intel.yaml`
+- `50-onexplayer_mini_a07.yaml` / `50-onexplayer_mini_pro.yaml`
+- `50-onexplayer_2.yaml` / `50-onexplayer_onexfly.yaml`
+- `50-onexplayer_x1.yaml` / `50-onexplayer_g1.yaml` / `50-onexplayer_apex.yaml`
+- `50-aokzoe_a1.yaml`
 
-CachyOS 上 HHD 和 InputPlumber 会抢手柄。社区安装 HHD 时需要 mask/卸掉 InputPlumber，并处理 `power-profiles-daemon` / `tuned` 和 Adjustor 抢 TDP 的问题。官方掌机镜像应只走 InputPlumber。
+新机通常：复制最接近的 YAML → 改 DMI `product_name` → 选或新建 capability map → 把 DMI 加进 `60-inputplumber-autostart.hwdb`。X1 / APEX 这类带厂商 HID（`1a86:fe00`）的机型，还可能要动 `src/drivers/oxp_hid/`。
+
+探测用的是 `product_name`，和内核 `oxpec` 用的 `board_name` 可能不同，两边都要采。
+
+CachyOS 还要把新 `product_name` 写进 chwd `hwd_product_name_pattern`，否则新装不会拉 InputPlumber。
+
+### 4.4 TDP / 风扇：InputPlumber 不管，走 PowerStation + steamos-manager
+
+| 组件 | 仓库 | 职责 |
+| --- | --- | --- |
+| PowerStation | [ShadowBlip/PowerStation](https://github.com/ShadowBlip/PowerStation) | 通用 CPU/GPU TDP D-Bus；Bazzite 用它给 Steam 滑条垫底 |
+| steamos-manager | [OpenGamingCollective/steamos-manager](https://github.com/OpenGamingCollective/steamos-manager)（CachyOS 也用同系包） | Steam 客户端的 `TdpLimit1` / `FanControl1` / GPU 时钟等 |
+| `oxpec` hwmon | 内核 | 风扇 PWM 实际写入点 |
+
+PowerStation 主要是通用 AMD/Intel sysfs，不是 HHD 那种按机型写 EC 的表。新机 TDP 往往不用新 YAML，只要 SMU / `amd_pstate` 能写；若 Steam 滑条范围不对，再查 PowerStation 的 DMI platform override，或 steamos-manager 的设备/remote 配置。
+
+风扇曲线：先保证 `oxpec` 认出 DMI 并出现 `pwm1`。Steam UI 风扇要 steamos-manager 实现 `FanControl1`（本机或 `remotes.d` 远程）。这不是 InputPlumber 的活。
+
+Intel OXP 很多本来就没有可靠的 Linux TDP 接口，HHD 当年也标 `w/o TDP`。换栈不会 magically 补上。
+
+### 4.5 HHD 仅作历史对照（最新版不必改）
+
+仓库：<https://github.com/hhd-dev/hhd>，路径 `src/hhd/device/oxp/const.py`。
+
+只有这些情况才需要碰它：给旧 Bazzite / 手动装 HHD 的 CachyOS 用户、或对照旧机协议（`hid_v1` / `serial` / `mixed`）。官方最新镜像不会加载这份配置。Adjustor 已并入 hhd v4，仓已归档。
 
 ---
 
@@ -371,12 +409,13 @@ CachyOS 上 HHD 和 InputPlumber 会抢手柄。社区安装 HHD 时需要 mask/
 4. **把补丁送进发行版**
    - Bazzite：LKML + OGC `features/onexplayer`（不要改已归档 kernel-bazzite）
    - CachyOS：`kernel-patches/<MAJOR>/misc/` + deckify `source`（如新增文件）
-5. **用户态**
-   - Bazzite（仍用 HHD）：`hhd/src/hhd/device/oxp/const.py`
-   - CachyOS / 新 Bazzite：InputPlumber `50-onexplayer_<model>.yaml` + capability map
-6. **TDP**
-   - AMD：确认 `amd_pstate` / ryzenadj / HHD Adjustor 的 SMU 表
-   - Intel：多数机型 HHD 标明无 TDP，或 Turbo 键留给厂商 TDP，不要强行 `tt_toggle`
+5. **用户态按键（最新版只改 InputPlumber，不改 HHD）**
+   - `50-onexplayer_<model>.yaml` + capability map + `60-inputplumber-autostart.hwdb`
+   - 厂商 HID 机型：`src/drivers/oxp_hid/`
+   - CachyOS：把 `product_name` 加进 chwd `handhelds/profiles.toml` 的正则
+6. **TDP / 风扇（不是 InputPlumber）**
+   - 风扇：先让 `oxpec` 出 hwmon；再确认 steamos-manager `FanControl1`
+   - TDP：PowerStation + steamos-manager；AMD 确认 SMU 可写。Intel 多数仍无 TDP
 
 ---
 
@@ -396,8 +435,8 @@ CachyOS 上 HHD 和 InputPlumber 会抢手柄。社区安装 HHD 时需要 mask/
   -> Bazzite ostree
           |                                     |
           v                                     v
-  HHD (legacy) / InputPlumber             InputPlumber
-  hhd/.../oxp/const.py                    50-onexplayer_*.yaml
+  InputPlumber + PowerStation             InputPlumber + steamos-manager
+  50-onexplayer_*.yaml                    同上 YAML；chwd profiles.toml
 ```
 
 | 步骤 | Bazzite / OGC | CachyOS |
@@ -420,5 +459,9 @@ CachyOS 上 HHD 和 InputPlumber 会抢手柄。社区安装 HHD 时需要 mask/
 - 旧 Bazzite 内核（归档）：<https://github.com/bazzite-org/kernel-bazzite>
 - CachyOS 补丁仓：<https://github.com/CachyOS/kernel-patches>
 - CachyOS deckify PKGBUILD：<https://github.com/CachyOS/linux-cachyos/blob/master/linux-cachyos-deckify/PKGBUILD>
-- HHD OXP：<https://github.com/hhd-dev/hhd/tree/master/src/hhd/device/oxp>
 - InputPlumber：<https://github.com/ShadowBlip/InputPlumber>
+- PowerStation：<https://github.com/ShadowBlip/PowerStation>
+- steamos-manager：<https://github.com/OpenGamingCollective/steamos-manager>
+- CachyOS chwd 掌机配置：<https://github.com/CachyOS/chwd/blob/master/profiles/pci/handhelds/profiles.toml>
+- Bazzite 弃用 HHD：<https://github.com/ublue-os/bazzite/commit/ce953e4306f2effa58f2fbb8a833081685aa5424>
+- HHD OXP（仅旧系统对照）：<https://github.com/hhd-dev/hhd/tree/master/src/hhd/device/oxp>
