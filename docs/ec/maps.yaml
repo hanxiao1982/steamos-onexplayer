@@ -39,6 +39,7 @@ shared: &shared
 platforms:
   intel_g3e:
     doc: x2-mini.md
+    live: x2-mini            # only ONEXPLAYER X2Mini has WMI reads
     access: oxpwmi
     ec_access_type: 2
     tdp_via: intel-msr
@@ -58,6 +59,7 @@ platforms:
 
   amd:
     doc: x2-mini-pro.md
+    live: none               # source-only; do not copy X2 Mini live values
     access: winring0
     ec_access_type: 1
     tdp_via: ryzenadj

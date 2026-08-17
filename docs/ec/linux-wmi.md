@@ -174,7 +174,7 @@ Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
 2. `wmidev_evaluate_method(wdev, 0, method_id, in, out)` with a driver mutex. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
 3. Input is a 4-byte little-endian `UInt32`: read `04, reg, 0, 0`; write likely `04, reg, value, 0`. Parse output byte[0] as status, byte[1] as the register. Do **not** pass JS `0x400+reg` as the UInt32.
-4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, `0xEB` turbo, PWM 0–184, charge `0xA3`–`0xA5`).
+4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, PWM 0–184, charge `0xA3`/`0xA4`). Skip `0xEB` / `0xA5` on X2 Mini (live unused).
 5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
 
 `hid-msi` / `hid-msi-claw` is the wrong template for fans and charge. OneXConsole already treats RGB/rumble/gyro as HID (`CommonHid`), same split as Claw.
@@ -268,7 +268,7 @@ iasl -d *.dat
 
 - 访问 `OperationRegion (…, EmbeddedControl, …)`，或调用 `ECRD` / `ECWR` / `\_SB.PCI0.LPCB.EC0.` 一类路径
 - 出现 `0x0400`、对参数做 `And 0xFF` / `ShiftRight 8`（group + offset，对应 `0x400+reg`）
-- 出现已知 G3E 偏移：`0x58` 风扇、`0x4A`/`0x4B` PWM、`0xEB` turbo、`0xA3`–`0xA5` 充电
+- 出现已知 G3E 偏移：`0x58` 风扇、`0x4A`/`0x4B` PWM、`0xA3`/`0xA4` 充电（X2 Mini 上 `0xEB`/`0xA5` 已 live 确认无用）
 
 同时满足「method GUID」+「AML 碰 EC / 0x400」的那条，就是 OxpWMI。事件 GUID 和 BMOF GUID 直接丢掉。
 

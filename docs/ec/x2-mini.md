@@ -1,50 +1,87 @@
 # Intel Arc G3 Extreme EC map (X2 Mini)
 
-Source: OneXConsole **0.10.2-fix8**.
+Source: OneXConsole **0.10.2-fix8**, plus live WMI `ReadECReg` on `ONEXPLAYER X2Mini`.
 
-X2 Mini is the Intel G3E SKU. The same EC offsets are used by the other G3E products below. X2 Mini PRO is a different (AMD) platform: [x2-mini-pro.md](x2-mini-pro.md).
+X2 Mini is the Intel G3E SKU. Other G3E products below share the **same offsets** in the app; only X2 Mini has been live-read. X2 Mini PRO is a different (AMD) platform: [x2-mini-pro.md](x2-mini-pro.md).
+
+Access: `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI `SuRwECRegInterface`). Wire: `GroupOffset = 0x04 | (reg << 8)`. Init is address-table only; raw WMI does not need it. See [access.md](access.md), [onexconsole-api.md](onexconsole-api.md).
 
 ## Products on this map
 
 | Marketing | DMI `Product` | Notes |
 |---|---|---|
-| X2 Mini | `ONEXPLAYER X2Mini` | landscape; handle key `X2Mini`; TDP 45/46 W, default 25 W |
-| X2 | `ONEXPLAYER X2` | 10.95" 3-in-1, `landscapeScreen=false`; handle key `X1`; TDP 35/36 W, unlock 40 W |
+| X2 Mini | `ONEXPLAYER X2Mini` | **Live-verified.** landscape; handle key `X2Mini`; TDP 45/46 W, default 25 W |
+| X2 | `ONEXPLAYER X2` | same EC init; `landscapeScreen=false`; handle key `X1`; TDP 35/36 W, unlock 40 W |
 | X2 EVA | `ONEXPLAYER X2 EVA` | same branch as X2 |
-| OneXPlayer 3 | `ONEXPLAYER 3` | handle key `OXP3`; RGB partition; TDP 35/36 W, unlock 40 W |
-| Apex Air | `ONEXPLAYER Apex Air` | same branch as Apex i; handle key `APEX`; default 25 W, boost 46 or 66 W by SKU flag |
+| OneXPlayer 3 | `ONEXPLAYER 3` | handle key `OXP3`; TDP 35/36 W, unlock 40 W |
+| Apex Air | `ONEXPLAYER Apex Air` | handle key `APEX`; default 25 W, boost 46 or 66 W by SKU flag |
 | Apex i | `ONEXPLAYER Apex i` | same EC init as Apex Air |
 
-All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`, `powerSupplyMode`, `enableBatteryProtection`, `programHandleType=CommonHid`.
+All force `useEcCpuTemp`, `powerSupplyMode`, `enableBatteryProtection`, `programHandleType=CommonHid`, PWM max **184**.
 
-## Register map
+## Live results vs OneXConsole (X2 Mini)
 
-8-bit ACPI EC RAM. OneXConsole wire format is `0x400 + offset`.
+Every row is: app address table → live WMI on this machine. `encoded = 0x400 + reg`.
 
-| Function | CompatLayerCT field | Register | Values |
+### Implement these (EC)
+
+| UI | CompatLayerCT | Reg | Encoded | OneXConsole | Live |
+|---|---|---|---|---|---|
+| 风扇自动 / 预设 1 / 预设 2 | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | 1098 | `0` auto, `1` manual | **Same.** JS `fanMode` 0/1/2; profiles 1 and 2 both write `1`. Profile id is not in EC. |
+| 风扇百分比 | `EC_ADDR_FAN_SPEED` | `0x4B` | 1099 | 0–184; UI % = `4B×100/184`; write `n×184/100` | **Same.** UI never shows raw `4B`. |
+| 风扇 RPM | `EC_ADDR_FAN_SPEED_H/L` | `0x58`/`0x59` | 1112/1113 | BE16 | **Matches UI RPM.** |
+| CPU 温度 | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | 1136 | °C | **Matches UI.** |
+| 充电上限 | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | 1187 | UI 50–100 step 5 | **Tracks slider.** |
+| 旁路供电 | `EC_ADDR_BYPASS_POWER` | `0xA4` | 1188 | HTTP 0/1/2 → EC **0 / 1 / 3** (`N=3`) | **Confirmed 0 / 1 / 3.** |
+| 供电模式（只读） | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | 1251 | oxp keys `1/2/3/4/5/8/9` | **Bitfield + firmware bit4.** See below. |
+
+Fan probe: [fan.md](fan.md). Charge probe: [charge.md](charge.md). UI vs EC: [ui-vs-ec.md](ui-vs-ec.md).
+
+### Ignore on X2 Mini (inited, unused)
+
+| CompatLayerCT | Reg | OneXConsole intent | Live |
 |---|---|---|---|
-| Fan RPM high | `EC_ADDR_FAN_SPEED_H` | `0x58` | **Live:** BE16 with `0x59`, matches UI RPM |
-| Fan RPM low | `EC_ADDR_FAN_SPEED_L` | `0x59` | |
-| PWM enable / auto | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | **Live:** `0` auto, `1` manual (UI profiles 1 and 2 both write `1`) |
-| PWM duty | `EC_ADDR_FAN_SPEED` | `0x4B` | **Live:** 0–184; UI % = `4B×100/184` (raw byte not shown) |
-| Turbo / app-fun | `EC_ADDR_APP_FUN_EN` | `0xEB` | **Ignore:** live always `66` (`0x42`); turbo/clock UI do not change it |
-| Handle power | `EC_ADDR_HANDLE_POWER` | `0x2D` | **Ignore:** live always `0` (plug/unplug handle does not change it) |
-| Charge limit % | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | **Live:** UI 50–100 step 5 writes this byte |
-| Charge bypass | `EC_ADDR_BYPASS_POWER` | `0xA4` | **Live:** EC **0 / 1 / 3** (HTTP 0 / 1 / 2) |
-| Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | `0xA5` | **Ignore:** live value stuck at `5`, no UI |
-| Power-supply mode | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | **Live:** oxp bits 0/1/3 plus firmware bit4 (no-batt). Battery-in matches oxp `1`/`3`/`9`; no-batt is `18`/`16` not `2`/`8`. See [ui-vs-ec.md](ui-vs-ec.md) |
-| TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | **Ignore:** live always `0`; TDP is MSR only |
-| Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | **Ignore:** ~30–32 °C board temp, not useful |
-| Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | **Ignore:** same |
-| CPU temp | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | **Live:** °C, matches UI |
-| Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | **Ignore:** live always `0` |
-| Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | **Ignore:** live BE16 always `0` |
+| `EC_ADDR_APP_FUN_EN` | `0xEB` | old turbo / app-fun (`oxpec` mask `0x40`) | always **66** (`0x42`). 睿频/频率 UI do not write it. `funcButtonMode` off. |
+| `EC_ADDR_HANDLE_POWER` | `0x2D` | handle on=`1` / off=`0` / restore=`-1` | always **0**. Plug/unplug does not change it (HID). |
+| `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | TDP gate (`getOXPSetTdpAble`) | always **0**. TDP is MSR. |
+| `EC_ADDR_OXP_BOARD_SENSOR1/2` | `0x60`/`0x61` | board temps | ~30–32 °C, not useful. |
+| `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | battery °C | always **0**. |
+| `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1`/`0xA2` | BE16 current | always **0**. |
+| `EC_ADDR_FORCE_CHARGE_MIN` | `0xA5` | no HTTP setter | stuck at **5**. |
 
-`fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2`. Read-only WMI probe: [fan.md](fan.md).
+### Not EC (UI goes elsewhere)
+
+Cross-checked against `background.js` routes. None of these write the G3E EC map.
+
+| UI | OneXConsole path | Notes |
+|---|---|---|
+| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | `intelTdpSetType=4`. `0xED` stays 0. |
+| 睿频开关 | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Does not touch `0xEB`. |
+| CPU 频率上限 | `/powerplan/setCpuMaxClock/{MHz}` | Power plan. Off → `0`. |
+| GPU 频率 | — | X2 Mini does **not** enable `manualGpuClk` / `gpuClk`. |
+| RGB / LED | `/rgbPartition/setColor\|setOpen\|setPreset` | `rgbPartitionMode`, `CommonHid`. No `EC_ADDR_RGB`. |
+| 震动 / 陀螺仪 / 键位 | `/programhandle/…`, `/gyro/…`, `/motor/…` | HID. |
+| 亮度、刷新率、音量 | Windows | `screenRefreshRate=120` is a capability flag. |
+| 手柄在位 | HID `handledHID` / `programhandle` | not `0x2D`. |
+
+## `0xE3` live vs oxp keys
+
+OneXConsole formula: `adapter_class | (battery ? 0x01 : 0)` — bits 0 battery, 1 ≥100W, 2 ≥140W/DC, 3 ≤65W. Map keys `1/2/3/4/5/8/9` only (`500`/`501` remapped to `1`). **No keys `16`/`18`.**
+
+| Condition | Live | oxp expected | Notes |
+|---|---|---|---|
+| Battery only | **1** | 1 | match |
+| ≥100W + battery | **3** | 3 | match |
+| ≥100W, no battery | **18** (`0x12`) | **2** | live = `2 \| 0x10` |
+| ≤65W + battery | **9** | 9 | match |
+| ≤65W, no battery | **16** (`0x10`) | **8** | only bit4; not `8` or `24` |
+| ≥140W / DC-in | not measured | 4 / 5 | X2 Mini `dcin=false`; keys 4/5 still exist as TypeC ≥140W icons |
+
+Firmware adds **bit4 (`0x10`)** = adapter-only. Normalize for oxp lookup: `16→8`, `18→2`. X2 Mini `changePl4Func` handles `1|2|3|4|5→160`, `9→120`, `8→65` — live **16/18** are missing. Full bit table: [ui-vs-ec.md](ui-vs-ec.md).
 
 ## Init (OneXConsole)
 
-These calls only fill CompatLayerCT’s `EC_ADDR_*` table (plus `setECAccessType` opens OxpWMI). They are not an EC handshake. Raw `ReadECReg` does not need them. See [onexconsole-api.md](onexconsole-api.md#what-init-actually-does).
+Address-table only. Raw `ReadECReg` does not need these.
 
 ```
 setECAccessType(2)
@@ -56,6 +93,12 @@ initOXPSensorEc(0x60, 0x61, 0x70, 0xA0, 0xA1, 0xA2)
 battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 ```
 
-Value ranges and a read-only WMI probe: [charge.md](charge.md).
+`fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2` (fan/charge offsets), **not** `oxp_fly`. Skip `0xEB` on this SKU.
 
-TDP PL1/PL2/PL4: Intel MSR (`/msr/setCpuPl`). RGB / gyro / rumble: HID. Full UI-vs-EC list: [ui-vs-ec.md](ui-vs-ec.md).
+## SteamOS / `oxpec` (X2 Mini)
+
+Use: fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`, optional decode of `0xE3`.
+
+Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
+
+TDP = Intel MSR. RGB / rumble / gyro = HID. 睿频 / CPU 频率 = host power policy, not EC.

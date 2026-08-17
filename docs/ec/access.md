@@ -149,7 +149,7 @@ Userspace on Linux (not used by `oxpec`):
 
 - Present as `oxp_fly` (recent): `ONEXPLAYER X2Mini PRO` (fan/turbo only in that profile).
 - Not in the table: `ONEXPLAYER X2Mini`, `ONEXPLAYER X2`, `ONEXPLAYER X2 EVA`, `ONEXPLAYER 3`, `ONEXPLAYER Apex Air`, `ONEXPLAYER Apex i`.
-- Those Intel SKUs match the X1/OXP2 register set (fan `0x58`, turbo `0xEB`, PWM 0–184), not `oxp_fly`.
+- Those Intel SKUs match the X1/OXP2 register set (fan `0x58`, PWM 0–184), not `oxp_fly`. X2 Mini live: skip turbo `0xEB`.
 
 **Registers OneXConsole uses that oxpec does not**
 

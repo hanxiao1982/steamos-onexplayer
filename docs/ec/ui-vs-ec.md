@@ -1,6 +1,8 @@
 # OneXConsole UI vs EC (X2 Mini)
 
-Live WMI reads on this machine.
+Canonical live table: [x2-mini.md](x2-mini.md). This page keeps the `0xE3` bit write-up and the read-only probe.
+
+Live WMI reads on `ONEXPLAYER X2Mini`.
 
 ## Confirmed (use these)
 

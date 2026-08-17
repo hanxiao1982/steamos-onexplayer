@@ -1,5 +1,7 @@
 # Charge limit / bypass / force-charge min
 
+X2 Mini live summary: [x2-mini.md](x2-mini.md). Mini PRO charge addrs are source-only: [x2-mini-pro.md](x2-mini-pro.md).
+
 Source: OneXConsole **0.10.2-fix8** UI + `battery/initEc` / `setChargeLimit` / `setByPassPowerMode`. Linux `oxpec` treats the same bytes as `charge_control_end_threshold` and `charge_behaviour`.
 
 These are ordinary EC RAM bytes. No `init*` is required to **read** them.

@@ -1,6 +1,6 @@
 # Fan registers (read-only probe)
 
-Intel G3E (X2 Mini) via OxpWMI. No `init*` needed for raw reads.
+Canonical live table: [x2-mini.md](x2-mini.md). Intel G3E (X2 Mini) via OxpWMI. No `init*` needed for raw reads.
 
 **X2 Mini live:** `0x4A` is only 0/1; UI fan profiles 1 and 2 both leave it at **1**. `PwmPercent = 4B×100/184` matches the OneXConsole fan %. RPM (`0x58`/`0x59`) and CPU temp (`0x70`) match the UI. The UI never shows raw `0x4B`.
 

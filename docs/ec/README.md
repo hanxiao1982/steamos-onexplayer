@@ -15,11 +15,9 @@ Two EC maps in this generation. Products that share a map are listed together.
 | Intel Arc G3 Extreme | `ONEXPLAYER X2Mini`, `ONEXPLAYER X2`, `ONEXPLAYER X2 EVA`, `ONEXPLAYER 3`, `ONEXPLAYER Apex Air`, `ONEXPLAYER Apex i` | OxpWMI (`ecAccessType=2`) | `0x58`/`0x59` | — (`0xEB` unused) | `0x4A`/`0x4B`, 0–184 | `0xA3`/`0xA4` | [x2-mini.md](x2-mini.md) |
 | AMD (Strix Halo / Fly) | `ONEXPLAYER X2Mini PRO`, `ONEXPLAYER APEX` | WinRing0 (`ecAccessType=1`) | `0x76`/`0x77` | `0xF1` | `0x4A`/`0x4B`, 0–255 | `0xE5`/`0xE6`/`0xE7` | [x2-mini-pro.md](x2-mini-pro.md) |
 
-Shared and **used** on X2 Mini: power-supply mode `0xE3` (status), CPU temp `0x70`. Live-ignored on X2 Mini: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB` (stuck at 66 / `0x42`), `0xED` (always 0; TDP is MSR).
+**X2 Mini live is complete** for the EC subset SteamOS needs: [x2-mini.md](x2-mini.md). Use fan `0x4A`/`0x4B`/`0x58`/`0x59`, charge `0xA3`/`0xA4`, CPU temp `0x70`, optional `0xE3`. Ignore `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB` (stuck at 66 / `0x42`), `0xED` (always 0). TDP is Intel MSR; 睿频/CPU 频率 is `/powerplan`; RGB/rumble/gyro is HID.
 
-TDP watts are not EC registers (Intel MSR / AMD ryzenadj). RGB, rumble, and gyro are HID (`CommonHid`).
-
-Linux `oxpec` treats X2 Mini PRO as `oxp_fly` for fan/turbo, but still uses charge `0xA3`/`0xA4`. OneXConsole uses **`0xE5`/`0xE6`/`0xE7`** on the AMD map.
+**X2 Mini PRO** is source-mapped only (no live reads): [x2-mini-pro.md](x2-mini-pro.md). WinRing0, fan `0x76`/`0x77` PWM 0–255, charge **`0xE5`/`0xE6`/`0xE7`**, turbo addr `0xF1`. Linux `oxpec` `oxp_fly` still uses charge `0xA3`/`0xA4` — that is a mismatch to fix after live check.
 
 ## How OneXConsole talks to the EC
 
@@ -38,8 +36,8 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 
 ## Files
 
-- [x2-mini.md](x2-mini.md) — Intel G3E map (X2 Mini and other G3E products)
-- [x2-mini-pro.md](x2-mini-pro.md) — AMD map (X2 Mini PRO / APEX)
+- [x2-mini.md](x2-mini.md) — Intel G3E map + **X2 Mini live vs OneXConsole** (approve this first)
+- [x2-mini-pro.md](x2-mini-pro.md) — AMD map, source-only (live later)
 - [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
 - [onexconsole-api.md](onexconsole-api.md) — localhost:1013 / named-pipe routes (F12 / proxy)
 - [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
