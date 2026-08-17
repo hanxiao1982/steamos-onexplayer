@@ -27,9 +27,9 @@ Kernel DMI board name for the Mini PRO patch: `ONEXPLAYER X2Mini PRO`. Linux `ox
 | PWM duty | `EC_ADDR_FAN_SPEED` | `0x4B` | **0–255** (unscaled) |
 | Turbo / app-fun | `EC_ADDR_APP_FUN_EN` | `0xF1` | Linux `oxpec` mask `0x40` |
 | Handle power | `EC_ADDR_HANDLE_POWER` | `0x2D` | on=`1`, off=`0` (restore unused, `-1`) |
-| Charge limit % | `EC_ADDR_CHARGE_LIMIT` | **`0xE5`** | 0–100 |
-| Charge bypass | `EC_ADDR_BYPASS_POWER` | **`0xE6`** | `0` off, `1` awake, `3` always |
-| Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | **`0xE7`** | |
+| Charge limit % | `EC_ADDR_CHARGE_LIMIT` | **`0xE5`** | EC 0–100; UI **50–100 step 5** |
+| Charge bypass | `EC_ADDR_BYPASS_POWER` | **`0xE6`** | EC **0 / 1 / 3** (HTTP mode index 0 / 1 / 2) |
+| Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | **`0xE7`** | no UI; read to see if 0–100 or unused |
 | Power-supply mode | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | |
 | TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | watts via ryzenadj |
 | Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | |

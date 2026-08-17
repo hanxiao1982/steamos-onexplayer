@@ -17,9 +17,17 @@ shared: &shared
   handle_power_on: 1
   handle_power_off: 0
   handle_power_restore: -1
+  charge_limit_ec_min: 0
+  charge_limit_ec_max: 100
+  charge_limit_ui_min: 50
+  charge_limit_ui_max: 100
+  charge_limit_ui_step: 5
   bypass_off: 0
   bypass_awake: 1
   bypass_always: 3
+  bypass_http_off: 0
+  bypass_http_awake: 1
+  bypass_http_always: 2
   power_supply_mode: 0xE3
   board_sensor1: 0x60
   board_sensor2: 0x61

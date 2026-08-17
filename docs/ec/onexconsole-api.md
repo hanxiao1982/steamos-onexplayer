@@ -164,8 +164,8 @@ X2 Mini PRO / APEX keep WinRing0 (`setECAccessType/1`) and the AMD defaults `126
 | POST | `/func/getOXPSensorCpuTemp` | CPU temp from EC `0x70` |
 | POST | `/func/getOXPSetTdpAble` | EC gate `0xED` (bool) |
 | POST | `/battery/getPowerSupplyMode` | `0xE3` |
-| POST | `/battery/setChargeLimit/{percent}` | Charge-limit byte |
-| POST | `/battery/setByPassPowerMode/{mode}` | Bypass 0 / 1 / 3 |
+| POST | `/battery/setChargeLimit/{percent}` | UI percent **50–100 step 5** (EC byte 0–100) |
+| POST | `/battery/setByPassPowerMode/{mode}` | HTTP **0 / 1 / 2** → EC **0 / 1 / 3** |
 | POST | `/battery/setMaxTdpLimit/{true\|false}` | Whether max-TDP lock is applied |
 
 ## TDP watts (not EC)
