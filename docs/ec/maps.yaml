@@ -13,33 +13,43 @@ shared: &shared
   pwm_enable_auto: 0
   pwm_enable_manual: 1
   pwm_duty: 0x4B
-  handle_power: 0x2D
+  handle_power: 0x2D          # X2 Mini live: always 0 — ignore
   handle_power_on: 1
   handle_power_off: 0
   handle_power_restore: -1
+  charge_limit_ec_min: 0
+  charge_limit_ec_max: 100
+  charge_limit_ui_min: 50
+  charge_limit_ui_max: 100
+  charge_limit_ui_step: 5
   bypass_off: 0
   bypass_awake: 1
   bypass_always: 3
-  power_supply_mode: 0xE3
-  board_sensor1: 0x60
+  bypass_http_off: 0
+  bypass_http_awake: 1
+  bypass_http_always: 2
+  power_supply_mode: 0xE3     # oxp: bit0 batt, bit1 >=100W, bit2 >=140W/DC, bit3 <=65W. X2 Mini live adds bit4 no-batt (16/18 not in oxp map)
+  board_sensor1: 0x60         # X2 Mini: ~30-32 C, ignore
   board_sensor2: 0x61
+  set_tdp_able: 0xED          # X2 Mini live: always 0 — TDP is MSR
   cpu_temp: 0x70
-  battery_temp: 0xA0
+  battery_temp: 0xA0   # X2 Mini live: always 0 — ignore
   battery_charge_current: 0xA1
-  set_tdp_able: 0xED
 
 platforms:
   intel_g3e:
     doc: x2-mini.md
+    live: x2-mini            # only ONEXPLAYER X2Mini has WMI reads
     access: oxpwmi
     ec_access_type: 2
     tdp_via: intel-msr
     fan_rpm: 0x58
-    app_fun_en: 0xEB
+    app_fun_en: 0xEB         # X2 Mini live: always 66 (0x42) — ignore
     pwm_max: 184
     charge_limit: 0xA3
     charge_bypass: 0xA4
-    force_charge_min: 0xA5
+    force_charge_min: 0xA5   # X2 Mini live: stuck at 5, no UI — ignore
+    charge_current_live: unused  # 0xA1/0xA2 BE16 always 0 on X2 Mini
     <<: *shared
     products:
       - {id: x2-mini, product: ONEXPLAYER X2Mini, marketing: X2 Mini, tdp: {max: 45, boost: 46, default: 25}}
@@ -49,6 +59,7 @@ platforms:
 
   amd:
     doc: x2-mini-pro.md
+    live: none               # source-only; do not copy X2 Mini live values
     access: winring0
     ec_access_type: 1
     tdp_via: ryzenadj

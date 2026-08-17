@@ -10,5 +10,7 @@ Two platforms, two maps:
 
 - [docs/ec/x2-mini.md](docs/ec/x2-mini.md) — Intel Arc G3 Extreme (X2 Mini, X2, OneXPlayer 3, Apex Air, …)
 - [docs/ec/x2-mini-pro.md](docs/ec/x2-mini-pro.md) — AMD (X2 Mini PRO, APEX)
-- [docs/ec/README.md](docs/ec/README.md) — access method and merged platform table
+- [docs/ec/README.md](docs/ec/README.md) — merged platform table
+- [docs/ec/access.md](docs/ec/access.md) — WinRing0 vs OxpWMI vs Linux oxpec
+- [docs/ec/linux-wmi.md](docs/ec/linux-wmi.md) — kernel WMI / MSI Claw G3E vs OxpWMI
 - [docs/ec/maps.yaml](docs/ec/maps.yaml) — machine-readable tables
