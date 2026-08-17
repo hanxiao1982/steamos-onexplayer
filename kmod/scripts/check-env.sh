@@ -98,6 +98,28 @@ case "$FLAVOR" in
 esac
 ok "内核" "$KREL"
 
+EC_STACK="oxpec"
+if [[ -n "${OXP_EC_STACK:-}" ]]; then
+  EC_STACK="$OXP_EC_STACK"
+elif [[ -n "$ROOT" && -x "${ROOT}/kmod/scripts/ec-stack.sh" ]]; then
+  EC_STACK="$("${ROOT}/kmod/scripts/ec-stack.sh" detect)"
+else
+  _pn="$(tr -d '\n' < /sys/class/dmi/id/product_name 2>/dev/null || true)"
+  _bn="$(tr -d '\n' < /sys/class/dmi/id/board_name 2>/dev/null || true)"
+  case "$_pn" in
+    "ONEXPLAYER X2Mini PRO"|"ONEXPLAYER APEX") EC_STACK=oxpec ;;
+    "ONEXPLAYER X2Mini"|"ONEXPLAYER X2"|"ONEXPLAYER X2 EVA"|"ONEXPLAYER 3"|"ONEXPLAYER Apex Air"|"ONEXPLAYER Apex i")
+      EC_STACK=oxp-wmi ;;
+  esac
+  if [[ "$EC_STACK" == oxpec ]]; then
+    case "$_bn" in
+      "ONEXPLAYER X2Mini"|"ONEXPLAYER X2"|"ONEXPLAYER X2 EVA"|"ONEXPLAYER 3"|"ONEXPLAYER Apex Air"|"ONEXPLAYER Apex i")
+        EC_STACK=oxp-wmi ;;
+    esac
+  fi
+fi
+ok "EC 栈" "$EC_STACK（oxp-wmi=Intel X2 Mini / G3E；oxpec=AMD ACPI EC）"
+
 # --- DMI (needed to add a model) ---
 if [[ -r /sys/class/dmi/id/board_vendor && -r /sys/class/dmi/id/board_name ]]; then
   bv="$(tr -d '\n' < /sys/class/dmi/id/board_vendor)"
@@ -135,26 +157,34 @@ if [[ "$COLLECT_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
-# --- fetch ---
-oxpec=""
-if [[ -n "$ROOT" && -f "${ROOT}/kmod/oxpec/oxpec.c" ]]; then
-  oxpec="${ROOT}/kmod/oxpec/oxpec.c"
-fi
-if [[ -n "$oxpec" ]]; then
-  ok "oxpec.c" "已有 ${oxpec}（不必访问 GitHub）"
-else
-  if has_cmd curl; then
-    ok "curl" "$(command -v curl)"
-    if curl -fsI --connect-timeout 5 --max-time 8 \
-      https://raw.githubusercontent.com/torvalds/linux/master/README >/dev/null 2>&1; then
-      ok "GitHub" "raw.githubusercontent.com 可达，fetch-oxpec.sh 能拉源码"
-    else
-      auto_or_fail "GitHub" "现在访问不了 raw.githubusercontent.com" \
-        "有网再装，或在电脑上 fetch+inject 后 OXP_PUSH_SOURCE=1 push"
-    fi
+# --- sources ---
+if [[ "$EC_STACK" == oxp-wmi ]]; then
+  if [[ -n "$ROOT" && -f "${ROOT}/linux/oxp-wmi/oxp-wmi.c" ]]; then
+    ok "oxp-wmi.c" "${ROOT}/linux/oxp-wmi/oxp-wmi.c（仓库内源码，不必 fetch）"
   else
-    auto_or_fail "curl" "未安装，且本地没有 oxpec.c" \
-      "CachyOS: sudo pacman -S curl；或从电脑 OXP_PUSH_SOURCE=1 推入源码"
+    fail "oxp-wmi.c" "缺少 linux/oxp-wmi/oxp-wmi.c；先 push 完整仓库"
+  fi
+else
+  oxpec=""
+  if [[ -n "$ROOT" && -f "${ROOT}/kmod/oxpec/oxpec.c" ]]; then
+    oxpec="${ROOT}/kmod/oxpec/oxpec.c"
+  fi
+  if [[ -n "$oxpec" ]]; then
+    ok "oxpec.c" "已有 ${oxpec}（不必访问 GitHub）"
+  else
+    if has_cmd curl; then
+      ok "curl" "$(command -v curl)"
+      if curl -fsI --connect-timeout 5 --max-time 8 \
+        https://raw.githubusercontent.com/torvalds/linux/master/README >/dev/null 2>&1; then
+        ok "GitHub" "raw.githubusercontent.com 可达，fetch-oxpec.sh 能拉源码"
+      else
+        auto_or_fail "GitHub" "现在访问不了 raw.githubusercontent.com" \
+          "有网再装，或在电脑上 fetch+inject 后 OXP_PUSH_SOURCE=1 push"
+      fi
+    else
+      auto_or_fail "curl" "未安装，且本地没有 oxpec.c" \
+        "CachyOS: sudo pacman -S curl；或从电脑 OXP_PUSH_SOURCE=1 推入源码"
+    fi
   fi
 fi
 
@@ -165,7 +195,7 @@ else
   if [[ "$FLAVOR" == cachyos ]]; then
     auto_or_fail "make" "未安装" "install-cachyos.sh 会装 base-devel"
   else
-    fail "make" "未安装（编 oxpec.ko 需要）"
+    fail "make" "未安装（编内核模块需要）"
     note "Bazzite 需在带匹配 kernel-devel 的环境里有 make；不要只用 Fedora 官方 devel"
   fi
 fi
@@ -309,16 +339,37 @@ else
 fi
 
 # --- in-tree oxpec ---
-oxpec_cfg="$(kconfig_val CONFIG_OXPEC)"
-if [[ "$oxpec_cfg" == y ]]; then
-  warn "CONFIG_OXPEC" "CONFIG_OXPEC=y（编进内核，树外 .ko 换不掉）"
-  note "只能走重编发行版内核；DMI-only 机型一般是 =m"
-elif [[ -n "$oxpec_cfg" ]]; then
-  ok "CONFIG_OXPEC" "CONFIG_OXPEC=${oxpec_cfg}"
-fi
-
-if [[ -e /var/lib/oxp-kmod/oxpec.ko ]]; then
-  ok "已装模块" "/var/lib/oxp-kmod/oxpec.ko"
+if [[ "$EC_STACK" == oxp-wmi ]]; then
+  wmi_cfg="$(kconfig_val CONFIG_ACPI_WMI)"
+  if [[ "$wmi_cfg" == n ]]; then
+    fail "CONFIG_ACPI_WMI" "n（oxp-wmi 依赖 ACPI WMI）"
+  elif [[ -n "$wmi_cfg" ]]; then
+    ok "CONFIG_ACPI_WMI" "CONFIG_ACPI_WMI=${wmi_cfg}"
+  else
+    warn "CONFIG_ACPI_WMI" "读不到内核 config"
+  fi
+  shopt -s nullglob
+  wmi_devs=(/sys/bus/wmi/devices/43B5A593-AD62-4257-8546-91B0797BEC1B*)
+  shopt -u nullglob
+  if [[ ${#wmi_devs[@]} -gt 0 ]]; then
+    ok "OxpWMI GUID" "${wmi_devs[0]}"
+  else
+    warn "OxpWMI GUID" "没有 43B5A593-AD62-4257-8546-91B0797BEC1B（非 X2 Mini 固件，或 WMI 未起来）"
+  fi
+  if [[ -e /var/lib/oxp-kmod/oxp-wmi.ko ]]; then
+    ok "已装模块" "/var/lib/oxp-kmod/oxp-wmi.ko"
+  fi
+else
+  oxpec_cfg="$(kconfig_val CONFIG_OXPEC)"
+  if [[ "$oxpec_cfg" == y ]]; then
+    warn "CONFIG_OXPEC" "CONFIG_OXPEC=y（编进内核，树外 .ko 换不掉）"
+    note "只能走重编发行版内核；DMI-only 机型一般是 =m"
+  elif [[ -n "$oxpec_cfg" ]]; then
+    ok "CONFIG_OXPEC" "CONFIG_OXPEC=${oxpec_cfg}"
+  fi
+  if [[ -e /var/lib/oxp-kmod/oxpec.ko ]]; then
+    ok "已装模块" "/var/lib/oxp-kmod/oxpec.ko"
+  fi
 fi
 
 if [[ -n "$ROOT" && -d "${ROOT}/kmod/devices" ]]; then

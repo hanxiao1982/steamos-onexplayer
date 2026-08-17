@@ -16,7 +16,7 @@
 
 | 路径 | 做什么 | 什么时候用 |
 | --- | --- | --- |
-| **A. 树外模块（推荐）** | 只编 `oxpec.ko` | 新机 EC 和已有变体相同，只缺 DMI。Bazzite / CachyOS 都走这条 |
+| **A. 树外模块（推荐）** | AMD 编 `oxpec.ko`；**X2 Mini / Intel G3E 编 `oxp-wmi.ko`** | 新机只缺 DMI（oxpec）或走仓库内 OxpWMI 驱动。Bazzite / CachyOS 都走这条 |
 | B. 重编 CachyOS deckify | `makepkg` 打进 `0001-handheld.patch` | 要改寄存器逻辑，或树外模块对不上 vermagic |
 | C. 重编 Bazzite / OGC 整核 | Fedora RPM + ostree 换核 | 几乎不该为 DMI 这么做；成本高，还要签名 |
 
@@ -58,8 +58,25 @@ kmod/scripts/apply-all.sh --fetch ogc      # 重新拉 oxpec.c，再注入全部
 | `oxp_x1` | X1 系列 | `0x58` | `0xEB` |
 | `oxp_2` | 2 系列 | `0x58` | `0xEB` |
 | `oxp_g1_a` / `oxp_g1_i` | G1 / SUPER X | G1 逻辑 | 机型相关 |
+| `oxp_wmi` | **X2 Mini / X2 / OXP3 / Apex Air（Intel OxpWMI）** | `0x58`/`0x4A`/`0x4B`（PWM 0–184） | 不走 oxpec |
 
-不确定时：先 `oxp_fly`，`insmod` 后看 `fan1_input` 是否像转速；明显不对再换变体。
+`collect-dmi.sh` 看到 `ONEXPLAYER X2Mini`（不是 `X2Mini PRO`）会写成 `OXP_EC_STACK=oxp-wmi`。仓库已带 `kmod/devices/x2-mini.env`。
+
+不确定 AMD 变体时：先 `oxp_fly`，`insmod` 后看 `fan1_input` 是否像转速；明显不对再换变体。
+
+### X2 Mini：编 oxp-wmi 而不是 oxpec
+
+Intel G3E 没有 ACPI EC 给 `oxpec` 用，风扇/充电走 WMI。部署脚本检测到这台是 X2 Mini 后：
+
+```bash
+kmod/scripts/ec-stack.sh          # oxp-wmi
+kmod/scripts/apply-all.sh         # make -C $KDIR M=linux/oxp-wmi
+sudo kmod/scripts/test-oxp-wmi.sh
+sudo kmod/scripts/install-oxp-wmi.sh
+sudo kmod/scripts/install-inputplumber.sh
+```
+
+`install-cachyos.sh` / `install-bazzite.sh` / `ssh-handheld.sh … all` 会自动走这条路径。源码在 `linux/oxp-wmi/`，不必 `fetch-oxpec.sh`。说明见 [ec/oxp-wmi.md](ec/oxp-wmi.md)。
 
 ---
 

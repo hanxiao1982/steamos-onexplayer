@@ -64,8 +64,19 @@ SYS_VENDOR="$(read_dmi sys_vendor)"
 PRODUCT_NAME="$(read_dmi product_name)"
 PRODUCT_VERSION="$(read_dmi product_version)"
 BOARD_VERSION="$(read_dmi board_version)"
-VARIANT="${OXP_BOARD_VARIANT:-oxp_fly}"
-CAP_MAP="${OXP_CAP_MAP:-oxp8}"
+EC_STACK="${OXP_EC_STACK:-$("$SCRIPT_DIR/ec-stack.sh" from-names "$PRODUCT_NAME" "$BOARD_NAME")}"
+if [[ -n "${OXP_BOARD_VARIANT:-}" ]]; then
+  VARIANT="$OXP_BOARD_VARIANT"
+elif [[ "$EC_STACK" == oxp-wmi ]]; then
+  VARIANT="oxp_wmi"
+else
+  VARIANT="oxp_fly"
+fi
+if [[ "$EC_STACK" == oxp-wmi ]]; then
+  CAP_MAP="${OXP_CAP_MAP:-oxp5}"
+else
+  CAP_MAP="${OXP_CAP_MAP:-oxp8}"
+fi
 
 if [[ "$BOARD_VENDOR" == UNKNOWN || "$BOARD_NAME" == UNKNOWN ]]; then
   echo "error: /sys/class/dmi/id/{board_vendor,board_name} missing or unreadable" >&2
@@ -94,6 +105,7 @@ product_version=$PRODUCT_VERSION
 OXP_BOARD_VENDOR=$BOARD_VENDOR
 OXP_BOARD_NAME=$BOARD_NAME
 OXP_BOARD_VARIANT=$VARIANT
+OXP_EC_STACK=$EC_STACK
 OXP_SYS_VENDOR=$SYS_VENDOR
 OXP_PRODUCT_NAME=$PRODUCT_NAME
 OXP_CAP_MAP=$CAP_MAP
@@ -121,6 +133,7 @@ fi
   echo "OXP_BOARD_VENDOR=$BOARD_VENDOR"
   echo "OXP_BOARD_NAME=$BOARD_NAME"
   echo "OXP_BOARD_VARIANT=$VARIANT"
+  echo "OXP_EC_STACK=$EC_STACK"
   echo "OXP_SYS_VENDOR=$SYS_VENDOR"
   echo "OXP_PRODUCT_NAME=$PRODUCT_NAME"
   echo "OXP_CAP_MAP=$CAP_MAP"

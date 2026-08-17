@@ -8,7 +8,7 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from device_lib import VALID_VARIANTS, is_placeholder, load_catalog
+from device_lib import OXPEC_VARIANTS, is_placeholder, load_catalog
 
 ENTRY = """\
 	{{
@@ -61,7 +61,10 @@ def main() -> int:
             print("no devices in catalog")
             return 0
         for dev in devices:
-            print(f"{dev['SLUG']}: {dev['OXP_BOARD_VENDOR']} / {dev['OXP_BOARD_NAME']} -> {dev['OXP_BOARD_VARIANT']}")
+            print(
+                f"{dev['SLUG']}: {dev['OXP_BOARD_VENDOR']} / {dev['OXP_BOARD_NAME']} "
+                f"-> {dev['OXP_BOARD_VARIANT']} [{dev.get('OXP_EC_STACK', 'oxpec')}]"
+            )
         return 0
 
     if not devices:
@@ -77,7 +80,10 @@ def main() -> int:
         if is_placeholder(dev["OXP_BOARD_NAME"]):
             print(f"skip placeholder {dev['OXP_BOARD_NAME']}", file=sys.stderr)
             continue
-        if dev["OXP_BOARD_VARIANT"] not in VALID_VARIANTS:
+        if dev.get("OXP_EC_STACK") == "oxp-wmi" or dev["OXP_BOARD_VARIANT"] == "oxp_wmi":
+            print(f"skip oxp-wmi {dev['OXP_BOARD_NAME']} (not an oxpec DMI row)")
+            continue
+        if dev["OXP_BOARD_VARIANT"] not in OXPEC_VARIANTS:
             raise SystemExit(f"bad variant {dev['OXP_BOARD_VARIANT']}")
         text, changed = inject_one(
             text,

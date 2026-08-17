@@ -1,21 +1,25 @@
-# 树外 oxpec + InputPlumber 本地叠加
+# 树外 EC 模块 + InputPlumber 本地叠加
 
 完整步骤见 [docs/local-build-and-deploy.md](../docs/local-build-and-deploy.md)。
 
-**可以在不同型号上反复执行。** 每台机写一份 `kmod/devices/<slug>.env`，注入/安装会累加，不会冲掉已有型号。
+**可以在不同型号上反复执行。** 每台机写一份 `kmod/devices/<slug>.env`。  
+**X2 Mini（Intel / OxpWMI）** 走 `linux/oxp-wmi`，不拉、不注入 `oxpec.c`。AMD 机型仍走 `oxpec`。
 
 ```bash
-# 真机：只追加这一台，不改其它 .env
+kmod/scripts/ec-stack.sh                 # X2 Mini 应打印 oxp-wmi
 kmod/scripts/collect-dmi.sh --add
 
-# 仓库里已有多份 devices/*.env 时：拉取上游源码并重新注入全部型号
-kmod/scripts/apply-all.sh --fetch ogc          # 或 mainline
-# 没有 kernel headers 时先只注入：
-# kmod/scripts/apply-all.sh --fetch ogc --inject-only
+# Intel G3E / X2 Mini
+kmod/scripts/apply-all.sh                # 编 oxp-wmi.ko
+sudo kmod/scripts/test-oxp-wmi.sh
+sudo kmod/scripts/install-oxp-wmi.sh
 
+# AMD / oxpec
+kmod/scripts/apply-all.sh --fetch ogc
 sudo kmod/scripts/test-oxpec.sh kmod/oxpec/oxpec.ko
 sudo kmod/scripts/install-common.sh
-sudo kmod/scripts/install-inputplumber.sh      # 每型号一份 YAML
+
+sudo kmod/scripts/install-inputplumber.sh
 ```
 
 查看目录：`kmod/scripts/apply-all.sh --list`

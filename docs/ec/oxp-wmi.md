@@ -24,7 +24,20 @@ Not implemented (unused on the current Intel table, or not EC): `0xEB`, `0x2D`, 
 
 ## Build / load
 
-On the handheld (kernel headers for the running image):
+X2 Mini (and other Intel G3E SKUs) go through the same `kmod/` deploy path as AMD boards. `ec-stack.sh` sees `ONEXPLAYER X2Mini` and builds **oxp-wmi**, not oxpec.
+
+```
+# On the handheld, or via ssh-handheld.sh user@host all
+kmod/scripts/ec-stack.sh                  # should print oxp-wmi
+kmod/scripts/apply-all.sh                 # make linux/oxp-wmi/oxp-wmi.ko
+sudo kmod/scripts/test-oxp-wmi.sh
+sudo kmod/scripts/install-oxp-wmi.sh      # /var/lib/oxp-kmod + systemd
+sudo kmod/scripts/install-inputplumber.sh
+```
+
+CachyOS / Bazzite one-shot (`install-cachyos.sh` / `install-bazzite.sh` / `on-device-install.sh`) detect the stack and take this path automatically.
+
+Manual:
 
 ```
 cd linux/oxp-wmi

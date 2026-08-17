@@ -82,6 +82,12 @@ push_repo() {
     --exclude 'kmod/oxpec/*.mod.c'
     --exclude 'kmod/oxpec/Module.symvers'
     --exclude 'kmod/oxpec/modules.order'
+    --exclude 'linux/oxp-wmi/*.ko'
+    --exclude 'linux/oxp-wmi/*.o'
+    --exclude 'linux/oxp-wmi/*.mod'
+    --exclude 'linux/oxp-wmi/*.mod.c'
+    --exclude 'linux/oxp-wmi/Module.symvers'
+    --exclude 'linux/oxp-wmi/modules.order'
   )
   if [[ "${OXP_PUSH_SOURCE:-0}" != 1 ]]; then
     excludes+=(--exclude 'kmod/oxpec/oxpec.c')
@@ -99,6 +105,10 @@ push_repo() {
       --exclude='kmod/oxpec/*.o'
       --exclude='kmod/oxpec/*.mod'
       --exclude='kmod/oxpec/*.mod.c'
+      --exclude='linux/oxp-wmi/*.ko'
+      --exclude='linux/oxp-wmi/*.o'
+      --exclude='linux/oxp-wmi/*.mod'
+      --exclude='linux/oxp-wmi/*.mod.c'
     )
     if [[ "${OXP_PUSH_SOURCE:-0}" != 1 ]]; then
       tar_ex+=(--exclude='kmod/oxpec/oxpec.c')

@@ -83,9 +83,9 @@ kmod/scripts/ssh-handheld.sh "$H" pull-devices
 | 子命令 | 做什么 |
 | --- | --- |
 | `push` | 把仓库拷到掌机 `~/steamos-onexplayer`（不含 `.git`、不含已编的 `.ko`） |
-| `check` / `status` | SSH 进去后跑 `check-env.sh`：发行版、DMI、工具链、内核头文件、`CONFIG_MODULE_SIG*`、Secure Boot、sudo、InputPlumber |
-| `collect` | 先 `--collect-only` 检查，再远程 `collect-dmi.sh`（默认 `--add`） |
-| `install` | 先完整环境检查，再 `sudo on-device-install.sh` |
+| `check` / `status` | SSH 进去后跑 `check-env.sh`：发行版、EC 栈（X2 Mini=`oxp-wmi`）、DMI、工具链、headers、签名、Secure Boot |
+| `collect` | 先 `--collect-only` 检查，再远程 `collect-dmi.sh`（默认 `--add`；X2 Mini 写成 `oxp_wmi`） |
+| `install` | 先完整环境检查，再 `sudo on-device-install.sh`（X2 Mini 编装 `oxp-wmi.ko`） |
 | `pull-devices` | 把掌机上的 `kmod/devices/*.env` 拉回电脑，和其它型号放一起 |
 | `all` | `push` + `check` + `collect --add` + `install` + `pull-devices`；有 `[FAIL]` 会停下来不装 |
 | `run -- cmd` | 在掌机仓库目录执行任意命令 |
