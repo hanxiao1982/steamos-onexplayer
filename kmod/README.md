@@ -2,16 +2,25 @@
 
 完整步骤见 [docs/local-build-and-deploy.md](../docs/local-build-and-deploy.md)。
 
+**可以在不同型号上反复执行。** 每台机写一份 `kmod/devices/<slug>.env`，注入/安装会累加，不会冲掉已有型号。
+
 ```bash
-kmod/scripts/collect-dmi.sh          # 真机
-# 编辑 kmod/local-device.env
-kmod/scripts/fetch-oxpec.sh ogc      # 或 mainline
-python3 kmod/scripts/inject-dmi.py --env kmod/local-device.env --oxpec kmod/oxpec/oxpec.c
-kmod/scripts/build.sh
-sudo kmod/scripts/test-oxpec.sh
+# 真机：只追加这一台，不改其它 .env
+kmod/scripts/collect-dmi.sh --add
+
+# 仓库里已有多份 devices/*.env 时：拉取上游源码并重新注入全部型号
+kmod/scripts/apply-all.sh --fetch ogc          # 或 mainline
+# 没有 kernel headers 时先只注入：
+# kmod/scripts/apply-all.sh --fetch ogc --inject-only
+
+sudo kmod/scripts/test-oxpec.sh kmod/oxpec/oxpec.ko
 sudo kmod/scripts/install-common.sh
-sudo kmod/scripts/install-inputplumber.sh
+sudo kmod/scripts/install-inputplumber.sh      # 每型号一份 YAML
 ```
+
+查看目录：`kmod/scripts/apply-all.sh --list`
 
 CachyOS 一键：`sudo kmod/scripts/install-cachyos.sh`  
 Bazzite 一键：`sudo kmod/scripts/install-bazzite.sh`（需要匹配的 kernel-devel，且关闭 Secure Boot）
+
+`kmod/local-device.env` 仍可作为额外一份（兼容旧流程）；正式积累请用 `kmod/devices/`。

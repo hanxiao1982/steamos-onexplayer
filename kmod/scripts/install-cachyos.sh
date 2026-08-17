@@ -15,9 +15,7 @@ pacman -S --needed --noconfirm \
 if [[ ! -f "${ROOT}/kmod/oxpec/oxpec.c" ]]; then
   "${ROOT}/kmod/scripts/fetch-oxpec.sh" mainline
 fi
-python3 "${ROOT}/kmod/scripts/inject-dmi.py" \
-  --env "${ROOT}/kmod/local-device.env" \
-  --oxpec "${ROOT}/kmod/oxpec/oxpec.c"
+"${ROOT}/kmod/scripts/inject-catalog.sh"
 
 "${ROOT}/kmod/scripts/build.sh"
 "${ROOT}/kmod/scripts/install-common.sh"

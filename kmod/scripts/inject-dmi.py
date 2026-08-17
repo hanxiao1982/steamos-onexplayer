@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Insert a local DMI entry into fetched oxpec.c. Same edit for both distros."""
+"""Insert every catalogued DMI entry into fetched oxpec.c. Safe to re-run."""
 from __future__ import annotations
 
 import argparse
@@ -7,16 +7,8 @@ import pathlib
 import re
 import sys
 
-VALID_VARIANTS = {
-    "oxp_fly",
-    "oxp_x1",
-    "oxp_2",
-    "oxp_g1_a",
-    "oxp_g1_i",
-    "oxp_mini_amd",
-    "oxp_mini_amd_a07",
-    "oxp_mini_amd_pro",
-}
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from device_lib import VALID_VARIANTS, is_placeholder, load_catalog
 
 ENTRY = """\
 	{{
@@ -29,21 +21,13 @@ ENTRY = """\
 """
 
 
-def load_env(path: pathlib.Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
-    return values
+def already_present(source: str, board: str) -> bool:
+    return f'DMI_EXACT_MATCH(DMI_BOARD_NAME, "{board}")' in source
 
 
-def inject(source: str, vendor: str, board: str, variant: str) -> str:
-    if f'DMI_EXACT_MATCH(DMI_BOARD_NAME, "{board}")' in source:
-        print(f"DMI already present: {board}")
-        return source
+def inject_one(source: str, vendor: str, board: str, variant: str) -> tuple[str, bool]:
+    if already_present(source, board):
+        return source, False
 
     block = ENTRY.format(vendor=vendor, board=board, variant=variant)
     apex = re.search(
@@ -53,32 +37,63 @@ def inject(source: str, vendor: str, board: str, variant: str) -> str:
         source,
     )
     if apex:
-        return source[: apex.end()] + block + source[apex.end() :]
+        return source[: apex.end()] + block + source[apex.end() :], True
 
     closer = source.rfind("\t{},\n};")
     if closer == -1:
         raise SystemExit("Could not find dmi_table terminator in oxpec.c")
-    return source[:closer] + block + source[closer:]
+    return source[:closer] + block + source[closer:], True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=pathlib.Path, required=True)
     parser.add_argument("--oxpec", type=pathlib.Path, required=True)
+    parser.add_argument("--devices-dir", type=pathlib.Path)
+    parser.add_argument("--env", type=pathlib.Path, action="append", default=[])
+    parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
-    env = load_env(args.env)
-    vendor = env["OXP_BOARD_VENDOR"]
-    board = env["OXP_BOARD_NAME"]
-    variant = env["OXP_BOARD_VARIANT"]
-    if variant not in VALID_VARIANTS:
-        raise SystemExit(f"unknown OXP_BOARD_VARIANT={variant}; use {sorted(VALID_VARIANTS)}")
-    if "NEWMODEL" in board:
-        print("warning: OXP_BOARD_NAME is still the placeholder ONEXPLAYER NEWMODEL", file=sys.stderr)
+    root = pathlib.Path(__file__).resolve().parents[1]
+    devices_dir = args.devices_dir or (root / "devices")
+    devices = load_catalog(devices_dir, args.env)
+    if args.list:
+        if not devices:
+            print("no devices in catalog")
+            return 0
+        for dev in devices:
+            print(f"{dev['SLUG']}: {dev['OXP_BOARD_VENDOR']} / {dev['OXP_BOARD_NAME']} -> {dev['OXP_BOARD_VARIANT']}")
+        return 0
+
+    if not devices:
+        raise SystemExit(
+            f"no devices to inject. Add kmod/devices/<model>.env or pass --env. "
+            f"See {devices_dir / 'example.env'}"
+        )
 
     text = args.oxpec.read_text(encoding="utf-8")
-    args.oxpec.write_text(inject(text, vendor, board, variant), encoding="utf-8")
-    print(f"injected {vendor} / {board} -> {variant}")
+    added = 0
+    skipped = 0
+    for dev in devices:
+        if is_placeholder(dev["OXP_BOARD_NAME"]):
+            print(f"skip placeholder {dev['OXP_BOARD_NAME']}", file=sys.stderr)
+            continue
+        if dev["OXP_BOARD_VARIANT"] not in VALID_VARIANTS:
+            raise SystemExit(f"bad variant {dev['OXP_BOARD_VARIANT']}")
+        text, changed = inject_one(
+            text,
+            dev["OXP_BOARD_VENDOR"],
+            dev["OXP_BOARD_NAME"],
+            dev["OXP_BOARD_VARIANT"],
+        )
+        if changed:
+            added += 1
+            print(f"added {dev['OXP_BOARD_VENDOR']} / {dev['OXP_BOARD_NAME']} -> {dev['OXP_BOARD_VARIANT']}")
+        else:
+            skipped += 1
+            print(f"already present: {dev['OXP_BOARD_NAME']}")
+
+    args.oxpec.write_text(text, encoding="utf-8")
+    print(f"done: added={added} skipped={skipped} total={len(devices)}")
     return 0
 
 

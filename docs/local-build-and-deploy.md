@@ -24,17 +24,31 @@
 
 ---
 
-## 1. 真机采集 DMI（两边同一套命令）
+## 1. 真机采集 DMI（可反复执行，按型号累加）
+
+**可以。** 每台新机只追加一份 `kmod/devices/<slug>.env`，注入和 InputPlumber 安装会把目录里**所有**型号写进去。不要在同一个 `local-device.env` 里改来改去——那样会丢掉上一台。
 
 在掌机上：
 
 ```bash
 cd /path/to/steamos-onexplayer
 chmod +x kmod/scripts/*.sh
-kmod/scripts/collect-dmi.sh
+kmod/scripts/collect-dmi.sh --add          # 写入 kmod/devices/<slug>.env
+# 指定文件名：kmod/scripts/collect-dmi.sh --add f1-oled-2026
 ```
 
-把输出写进 `kmod/local-device.env`。
+`--add` 只创建/覆盖**这一份**文件，其它 `devices/*.env` 不动。已存在时加 `--force` 才覆盖该文件。
+
+把新 `.env` 拷回仓库（和旧的放在一起），之后在任意一台机器上：
+
+```bash
+kmod/scripts/apply-all.sh --list           # 看目录里有哪些型号
+kmod/scripts/apply-all.sh --fetch ogc      # 重新拉 oxpec.c，再注入全部型号后编译
+```
+
+`fetch-oxpec.sh` 会覆盖 `oxpec.c`（注入丢失）；必须再跑一次注入。`apply-all.sh --fetch` 就是「拉新源码 + 把目录里每台机的 DMI 全部加回去」。再跑一遍注入是幂等的：已有的 `BOARD_NAME` 会 `skipped`，不会重复插入。
+
+`kmod/local-device.env` 仍可作为额外一份（旧流程）；占位值 `ONEXPLAYER NEWMODEL` 会被跳过。`example.env` 和 `_*.env` 也不会注入。
 
 `OXP_BOARD_VARIANT` 按 EC 选，不要按商品名猜：
 
@@ -54,9 +68,8 @@ kmod/scripts/collect-dmi.sh
 ```bash
 # Bazzite 更接近 OGC 树；CachyOS 用 mainline 即可。两边注入脚本相同。
 kmod/scripts/fetch-oxpec.sh ogc        # 或 mainline / cachyos
-python3 kmod/scripts/inject-dmi.py \
-  --env kmod/local-device.env \
-  --oxpec kmod/oxpec/oxpec.c
+kmod/scripts/inject-catalog.sh         # 注入 kmod/devices/* 全部型号
+# 等价：kmod/scripts/apply-all.sh --fetch ogc --inject-only
 ```
 
 注入结果等价于在 `dmi_table[]` 里加：
@@ -103,7 +116,7 @@ sudo pacman -S --needed linux-cachyos-deckify-headers base-devel pahole
 uname -r    # 应类似 7.1.8-1-cachyos-deckify
 ```
 
-一键（root，已填好 `local-device.env`）：
+一键（root，目录里已有至少一份真实的 `devices/*.env`）：
 
 ```bash
 sudo kmod/scripts/install-cachyos.sh
@@ -224,14 +237,15 @@ sudo dkms install oxpec-local/1.0.0
 ## 6. 按键：InputPlumber 本地叠加（仍然不改 HHD）
 
 ```bash
-# 先改 kmod/local-device.env 里的 OXP_PRODUCT_NAME / OXP_SYS_VENDOR
+# 按 kmod/devices/*.env 各写一份 50-onexplayer-local-<slug>.yaml
+# 以及一份包含全部 DMI 的 /etc/udev/hwdb.d/61-oxp-local.hwdb
 sudo kmod/scripts/install-inputplumber.sh
 journalctl -u inputplumber -b --no-pager | tail -n 50
 ```
 
 模板：`kmod/inputplumber/50-onexplayer_local.yaml`。`phys_path` 因主板 USB 口而异，先用 `name` + `handler` 宽匹配，再在 `evtest` / `udevadm info` 里收紧。
 
-`capability_map_id`：APEX 类用 `oxp8`，X1 类试 `oxp5`。
+`OXP_CAP_MAP`：APEX 类用 `oxp8`，X1 类试 `oxp5`。每份 `.env` 可不同。
 
 CachyOS 新装还要把 `product_name` 加进 chwd `handhelds/profiles.toml` 的正则，否则下一台机器不会自动装 InputPlumber。本机手工 `pacman -S inputplumber` 即可先测。
 
@@ -275,17 +289,17 @@ Bazzite 是 ostree 镜像，内核来自 OGC 签名 RPM。本地重编整核需�
 ## 9. 推荐工作顺序
 
 ```
-真机 collect-dmi.sh
-    -> 填 local-device.env
-    -> fetch-oxpec.sh + inject-dmi.py
-    -> 装匹配 headers
-    -> build.sh
-    -> sudo test-oxpec.sh   # 看到 hwmon
+真机 collect-dmi.sh --add          # 只追加这一台
+    -> 把新的 devices/<slug>.env 放进仓库（保留旧的）
+    -> apply-all.sh --fetch ogc    # 拉源码 + 注入全部型号 + 编译
+    -> sudo test-oxpec.sh          # 看到 hwmon
     -> sudo install-common.sh
     -> sudo install-inputplumber.sh
     -> 再把同一份 DMI diff 送 LKML / OGC / CachyOS
+换下一台：重复 --add，不要覆盖上一份 .env
 ```
 
-内核模块文件：`kmod/oxpec/oxpec.c`（拉取后注入）。  
-用户态按键：`kmod/inputplumber/50-onexplayer_local.yaml`。  
+内核模块文件：`kmod/oxpec/oxpec.c`（拉取后注入，不要提交）。  
+型号目录：`kmod/devices/*.env`。  
+用户态按键：每型号一份 `50-onexplayer-local-<slug>.yaml`。  
 不要写 HHD。
