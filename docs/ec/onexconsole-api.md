@@ -104,7 +104,7 @@ So OneXConsole inits **before its own** `/fan/getFanSpeed` / `/battery/setCharge
 | `initBaseEc` | `EC_ADDR_APP_FUN_EN`, `EC_ADDR_FAN_SPEED_H/L` | `0xEB`, `0x58`/`0x59` | `0xF1`, `0x76`/`0x77` |
 | `fan/init` | `EC_ADDR_FAN_AUTOMATE` + on/off values, `EC_ADDR_FAN_SPEED`, `FAN_MAX_SPEED_VALUE` | `0x4A` 0/1, `0x4B`, max 184 | same addrs, max 255 |
 | `initHandleEc` | `EC_ADDR_HANDLE_POWER` + on/off/restore values | `0x2D`, 1 / 0 / −1 | same |
-| `initOXPSensorEc` | board/CPU/battery/current addrs | `0x60`/`0x61`/`0x70` used; `0xA0`/`0xA1`/`0xA2` unused on X2 Mini | same addrs (AMD live untested) |
+| `initOXPSensorEc` | board/CPU/battery/current addrs | only `0x70` useful on X2 Mini | same addrs (AMD live untested) |
 | `battery/initEc` | charge / bypass / force-min addrs + bypass values | `0xA3`/`0xA4` used; `0xA5` unused on X2 Mini | `0xE5`/`0xE6` ( `0xE7` untested ) |
 | `initPowerSupplyModeEC` | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | `0xE3` |
 

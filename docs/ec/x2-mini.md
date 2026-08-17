@@ -27,15 +27,15 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 | Fan RPM low | `EC_ADDR_FAN_SPEED_L` | `0x59` | |
 | PWM enable / auto | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | **Live:** `0` auto, `1` manual (UI profiles 1 and 2 both write `1`) |
 | PWM duty | `EC_ADDR_FAN_SPEED` | `0x4B` | **Live:** 0–184; UI % = `4B×100/184` (raw byte not shown) |
-| Turbo / app-fun | `EC_ADDR_APP_FUN_EN` | `0xEB` | Linux `oxpec` mask `0x40` |
-| Handle power | `EC_ADDR_HANDLE_POWER` | `0x2D` | on=`1`, off=`0` (restore unused, `-1`) |
+| Turbo / app-fun | `EC_ADDR_APP_FUN_EN` | `0xEB` | **Ignore:** live always `66` (`0x42`); turbo/clock UI do not change it |
+| Handle power | `EC_ADDR_HANDLE_POWER` | `0x2D` | **Ignore:** live always `0` (plug/unplug handle does not change it) |
 | Charge limit % | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | **Live:** UI 50–100 step 5 writes this byte |
 | Charge bypass | `EC_ADDR_BYPASS_POWER` | `0xA4` | **Live:** EC **0 / 1 / 3** (HTTP 0 / 1 / 2) |
 | Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | `0xA5` | **Ignore:** live value stuck at `5`, no UI |
 | Power-supply mode | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | |
-| TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | watts via Intel MSR |
-| Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | |
-| Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | |
+| TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | **Ignore:** live always `0`; TDP is MSR only |
+| Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | **Ignore:** ~30–32 °C board temp, not useful |
+| Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | **Ignore:** same |
 | CPU temp | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | **Live:** °C, matches UI |
 | Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | **Ignore:** live always `0` |
 | Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | **Ignore:** live BE16 always `0` |

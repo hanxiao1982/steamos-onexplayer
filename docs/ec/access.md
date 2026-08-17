@@ -155,14 +155,15 @@ Userspace on Linux (not used by `oxpec`):
 
 | Register | Role |
 |---|---|
-| `0x60` / `0x61` | board sensors |
-| `0x70` | CPU temp (`useEcCpuTemp`) |
+| `0x60` / `0x61` | board sensors; **X2 Mini: ~30–32 °C, ignore** |
+| `0x70` | CPU temp (`useEcCpuTemp`); **live, matches UI** |
 | `0xA0` | battery temp; **X2 Mini live: always 0, ignore** |
 | `0xA1` / `0xA2` | charge current (16-bit BE); **X2 Mini live: always 0, ignore** |
 | `0xA5` or `0xE7` | force-charge minimum; **X2 Mini live: stuck at 5, no UI, ignore** |
-| `0xE3` | power-supply mode |
-| `0x2D` | detachable-handle power |
-| `0xED` | “set TDP allowed” gate |
+| `0xE3` | power-supply mode (status) |
+| `0x2D` | handle power; **X2 Mini live: always 0, ignore** |
+| `0xEB` | app-fun / turbo; **X2 Mini live: always 66 (`0x42`), ignore** |
+| `0xED` | “set TDP allowed” gate; **X2 Mini live: always 0, TDP is MSR** |
 
 **Registers oxpec has, with mismatches**
 
@@ -177,6 +178,6 @@ TDP watts stay out of the EC on both sides (MSR / `ryzenadj` vs `oxpec` which do
 
 ## Implications for SteamOS
 
-1. **AMD (X2 Mini PRO)** — `oxpec` + ACPI EC is the right shape. Add DMI if missing; switch charge to `0xE5`/`0xE6`/`0xE7`; optionally expose `0xE3` / `0x2D` / sensors.
-2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge **`0xA3`/`0xA4`**). If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID from `SuRwECRegInterface`’s `guid` qualifier or from `_WDG`+`WMxx` AML (do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
+1. **AMD (X2 Mini PRO)** — `oxpec` + ACPI EC is the right shape. Add DMI if missing; switch charge to `0xE5`/`0xE6` (skip `0xE7` until live-checked).
+2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, PWM 0–184, charge **`0xA3`/`0xA4`**, CPU temp `0x70`). Skip `0xEB` / `0x2D` / `0xED` / board temps on X2 Mini. If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID from `SuRwECRegInterface`’s `guid` qualifier or from `_WDG`+`WMxx` AML (do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
 3. Do not use WinRing0-style port I/O from Linux userspace; use ACPI EC or WMI.

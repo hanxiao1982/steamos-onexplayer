@@ -13,7 +13,7 @@ shared: &shared
   pwm_enable_auto: 0
   pwm_enable_manual: 1
   pwm_duty: 0x4B
-  handle_power: 0x2D
+  handle_power: 0x2D          # X2 Mini live: always 0 — ignore
   handle_power_on: 1
   handle_power_off: 0
   handle_power_restore: -1
@@ -29,12 +29,12 @@ shared: &shared
   bypass_http_awake: 1
   bypass_http_always: 2
   power_supply_mode: 0xE3
-  board_sensor1: 0x60
+  board_sensor1: 0x60         # X2 Mini: ~30-32 C, ignore
   board_sensor2: 0x61
+  set_tdp_able: 0xED          # X2 Mini live: always 0 — TDP is MSR
   cpu_temp: 0x70
   battery_temp: 0xA0   # X2 Mini live: always 0 — ignore
   battery_charge_current: 0xA1
-  set_tdp_able: 0xED
 
 platforms:
   intel_g3e:
@@ -43,7 +43,7 @@ platforms:
     ec_access_type: 2
     tdp_via: intel-msr
     fan_rpm: 0x58
-    app_fun_en: 0xEB
+    app_fun_en: 0xEB         # X2 Mini live: always 66 (0x42) — ignore
     pwm_max: 184
     charge_limit: 0xA3
     charge_bypass: 0xA4
