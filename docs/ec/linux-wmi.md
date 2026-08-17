@@ -129,7 +129,16 @@ uStringReturn = 0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 
 That matches the 8-byte block OneXConsole parses. **`ReturnValue True` only means the WMI method ran**, not that `0xFF` is a real RPM. `0xFF00` is not a plausible fan speed; `0xFF` is also the usual “empty / unused / not updating” EC value.
 
-Follow-up on the same unit: `0x58`, `0x59`, `0x4A`, `0x4B`, `0x70`, `0x60` all returned the **same** `0xFF,0x00,…` with `ReturnValue=True`. That is not a valid sensor map. The CIM method is being invoked, but either `GroupOffset` is not reaching AML (type/name/packing) or the real payload is not `uStringReturn`. Next: dump full method result members, `CimClassMethods` parameter types / `WmiMethodId`, all instances, and retry as `[uint16]`, raw 8-bit offset, and `Invoke-WmiMethod`.
+Schema from the same unit:
+
+- Instance: `ACPI\PNP0C14\RWECREGWMI_0`
+- `ReadECReg(GroupOffset: UInt32)` → `uStringReturn: String`
+- `WriteECReg(GroupOffsetValue: UInt32)` → `uStringReturn: String` (a second method uses the same in/out names)
+- Out-params are only `uStringReturn` (+ CIM `ReturnValue`). No separate `Data`/`Bytes` field.
+
+`0x58` / `0x59` / `0x4A` / `0x4B` / `0x70` / `0x60` as `0x400+reg` (e.g. `0x458`) and as raw `0x58` all returned the **same** `0xFF,0x00,…`. `ReturnValue=True` only means the WMI method ran.
+
+Likely cause: AML reads **byte 0 = group, byte 1 = offset** from the little-endian UInt32. `0x458` is stored as `58 04 00 00`, so group becomes `0x58` which is `> 0x0F` (OneXConsole’s group max). Firmware then returns the dummy `0xFF` block. The packing to try is `GroupOffset = 0x04 | (reg << 8)` (`0x58` → `0x5804` → bytes `04 58 00 00`). `WmiMethodId` is still missing from the dump.
 
 ## What to reuse for an OxpWMI Linux backend
 
