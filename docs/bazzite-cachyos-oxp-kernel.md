@@ -20,6 +20,8 @@
 
 新机最常见的内核改动就是：在 `oxpec.c` 的 `dmi_table[]` 里加一条 `DMI_BOARD_NAME`，并把它绑到已有 board 变体（`oxp_fly` / `oxp_x1` / `oxp_2` 等）。APEX 就是这样绑到 `oxp_fly` 的。
 
+**不要等主线。** 同一段 DMI 可以编成树外 `oxpec.ko`，在 Bazzite 和 CachyOS 上对着当前内核安装。流程见 [local-build-and-deploy.md](local-build-and-deploy.md)，工具在 `kmod/`。
+
 ---
 
 ## 1. 主线内核：真正的 OXP 模块源码

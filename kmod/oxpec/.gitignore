@@ -1,0 +1,13 @@
+oxpec.c
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+.*.cmd
+Module.symvers
+modules.order
+.oxpec.ko.cmd
+.oxpec.mod.cmd
+.oxpec.o.cmd
+.tmp_versions/

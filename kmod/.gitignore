@@ -1,0 +1,7 @@
+scripts/__pycache__/
+*.pyc
+oxpec/oxpec.c
+oxpec/*.ko
+oxpec/*.o
+oxpec/*.mod
+oxpec/*.mod.c
