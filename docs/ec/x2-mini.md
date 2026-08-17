@@ -58,4 +58,4 @@ battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 
 Value ranges and a read-only WMI probe: [charge.md](charge.md).
 
-TDP PL1/PL2/PL4: Intel MSR (`/msr/setCpuPl`). RGB / gyro / rumble: HID.
+TDP PL1/PL2/PL4: Intel MSR (`/msr/setCpuPl`). RGB / gyro / rumble: HID. Full UI-vs-EC list: [ui-vs-ec.md](ui-vs-ec.md).

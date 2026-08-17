@@ -46,3 +46,4 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [maps.yaml](maps.yaml) — machine-readable tables
 - [charge.md](charge.md) — charge-limit / bypass / force-min ranges and read-only probe
 - [fan.md](fan.md) — fan PWM / RPM read-only probe (X2 Mini)
+- [ui-vs-ec.md](ui-vs-ec.md) — which OneXConsole controls are EC vs MSR/HID
