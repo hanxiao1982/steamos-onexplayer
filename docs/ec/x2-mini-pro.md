@@ -54,4 +54,6 @@ initOXPSensorEc(0x60, 0x61, 0x70, 0xA0, 0xA1, 0xA2)
 battery/initEc(0xE5, 0xE6, 0xE7, 0, 1, 3)   # JS: 1253, 1254, 1255, N=3
 ```
 
+Value ranges: [charge.md](charge.md).
+
 TDP PL1/PL2: `ryzenadj`. RGB / gyro / rumble: HID.

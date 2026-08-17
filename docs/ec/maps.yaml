@@ -28,7 +28,7 @@ shared: &shared
   bypass_http_off: 0
   bypass_http_awake: 1
   bypass_http_always: 2
-  power_supply_mode: 0xE3
+  power_supply_mode: 0xE3     # oxp: bit0 batt, bit1 >=100W, bit2 >=140W/DC, bit3 <=65W. X2 Mini live adds bit4 no-batt (16/18 not in oxp map)
   board_sensor1: 0x60         # X2 Mini: ~30-32 C, ignore
   board_sensor2: 0x61
   set_tdp_able: 0xED          # X2 Mini live: always 0 — TDP is MSR

@@ -154,7 +154,7 @@ JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStri
 | `0x4B` | `0x4B04` | `0x25` | PWM duty **37** (range 0–184) |
 | `0x70` | `0x7004` | `0x31` | EC CPU temp **49 °C** |
 | `0x60` | `0x6004` | `0x2A` | board sensor **42 °C** |
-| `0xA0` | `0xA004` | `0x00` | battery temp 0 (idle / unused / other scale) |
+| `0xA0` | `0xA004` | `0x00` | battery temp; **ignore** (always 0 on X2 Mini) |
 
 Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI **read** path are validated.
 

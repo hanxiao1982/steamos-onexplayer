@@ -32,7 +32,7 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 | Charge limit % | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | **Live:** UI 50–100 step 5 writes this byte |
 | Charge bypass | `EC_ADDR_BYPASS_POWER` | `0xA4` | **Live:** EC **0 / 1 / 3** (HTTP 0 / 1 / 2) |
 | Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | `0xA5` | **Ignore:** live value stuck at `5`, no UI |
-| Power-supply mode | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | |
+| Power-supply mode | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | **Live:** oxp bits 0/1/3 plus firmware bit4 (no-batt). Battery-in matches oxp `1`/`3`/`9`; no-batt is `18`/`16` not `2`/`8`. See [ui-vs-ec.md](ui-vs-ec.md) |
 | TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | **Ignore:** live always `0`; TDP is MSR only |
 | Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | **Ignore:** ~30–32 °C board temp, not useful |
 | Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | **Ignore:** same |
