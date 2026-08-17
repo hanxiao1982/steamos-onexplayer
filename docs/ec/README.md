@@ -19,8 +19,6 @@ Shared on both maps: handle power `0x2D` (on=`1`, off=`0`), power-supply mode `0
 
 TDP watts are not EC registers (Intel MSR / AMD ryzenadj). RGB, rumble, and gyro are HID (`CommonHid`).
 
-There is no `X2 Air` / `X2Air` product string. The 2026 Air handheld is **Apex Air** (Intel G3E).
-
 Linux `oxpec` treats X2 Mini PRO as `oxp_fly` for fan/turbo, but still uses charge `0xA3`/`0xA4`. OneXConsole uses **`0xE5`/`0xE6`/`0xE7`** on the AMD map.
 
 ## How OneXConsole talks to the EC
