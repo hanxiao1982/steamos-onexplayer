@@ -23,7 +23,7 @@ Linux `oxpec` treats X2 Mini PRO as `oxp_fly` for fan/turbo, but still uses char
 
 ## How OneXConsole talks to the EC
 
-See [access.md](access.md) for the two backends and the Linux `oxpec` comparison.
+See [access.md](access.md) for the two backends and the Linux `oxpec` comparison. Intel G3E WMI vs in-tree MSI Claw (`msi-wmi-platform`): [linux-wmi.md](linux-wmi.md).
 
 Short version:
 
@@ -41,4 +41,5 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [x2-mini.md](x2-mini.md) — Intel G3E map (X2 Mini and other G3E products)
 - [x2-mini-pro.md](x2-mini-pro.md) — AMD map (X2 Mini PRO / APEX)
 - [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
+- [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
 - [maps.yaml](maps.yaml) — machine-readable tables

@@ -103,10 +103,13 @@ acpi_release_global_lock();
 
 There is **no** `SuRwECRegInterface` client in `oxpec`. If a G3E firmware hides Embedded Control from ACPI and only exposes WMI, `oxpec` cannot talk to that EC until a WMI backend exists.
 
+The kernel *does* already have a G3E handheld that speaks EC-over-WMI: MSI Claw 8 EX AI+ via `msi-wmi-platform`. Same transport (`wmidev_evaluate_method` on `PNP0C14`), different class/GUID/method ABI than `SuRwECRegInterface`. File map and comparison: [linux-wmi.md](linux-wmi.md).
+
 Userspace on Linux (not used by `oxpec`):
 
 - `/sys/kernel/debug/ec/ec0/io` when `CONFIG_ACPI_EC_DEBUGFS` / `ec_sys` is enabled
 - Still 8-bit ACPI EC, not WMI
+- `/sys/bus/wmi/devices/*/bmof` (decode with `bmfdec`) to find the OneXPlayer GUID
 
 ## Side-by-side
 
@@ -162,5 +165,5 @@ TDP watts stay out of the EC on both sides (MSR / `ryzenadj` vs `oxpec` which do
 ## Implications for SteamOS
 
 1. **AMD (X2 Mini PRO)** — `oxpec` + ACPI EC is the right shape. Add DMI if missing; switch charge to `0xE5`/`0xE6`/`0xE7`; optionally expose `0xE3` / `0x2D` / sensors.
-2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge `0xA3`–`0xA5`). If ACPI EC is absent, port `SuRwECRegInterface` (`ReadECReg` / `WriteECReg`, `GroupOffset = 0x400 + reg`) instead of cloning WinRing0.
+2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge `0xA3`–`0xA5`). If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID (dump bmof; do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
 3. Do not use WinRing0-style port I/O from Linux userspace; use ACPI EC or WMI.
