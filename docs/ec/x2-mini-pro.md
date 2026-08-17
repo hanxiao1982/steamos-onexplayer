@@ -42,6 +42,8 @@ Kernel DMI board name for the Mini PRO patch: `ONEXPLAYER X2Mini PRO`. Linux `ox
 
 ## Init (OneXConsole)
 
+Address-table only (plus WinRing0 `InitEC`). Not required for raw ACPI EC R/W. See [onexconsole-api.md](onexconsole-api.md#what-init-actually-does).
+
 ```
 setECAccessType(1)
 initBaseEc(0xF1, 0x76, 0x77)          # JS defaults: 1265, 1142, 1143

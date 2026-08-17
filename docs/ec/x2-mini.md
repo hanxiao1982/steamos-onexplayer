@@ -44,6 +44,8 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 
 ## Init (OneXConsole)
 
+These calls only fill CompatLayerCT’s `EC_ADDR_*` table (plus `setECAccessType` opens OxpWMI). They are not an EC handshake. Raw `ReadECReg` does not need them. See [onexconsole-api.md](onexconsole-api.md#what-init-actually-does).
+
 ```
 setECAccessType(2)
 initBaseEc(0xEB, 0x58, 0x59)          # JS: 1259, 1112, 1113

@@ -74,7 +74,53 @@ Response wrapper:
 
 `code == 1` is success; Electron then `JSON.parse(result)`.
 
-Init routes put **encoded EC addresses** in the path (`encoded = 0x400 + reg`). Later get/set routes send **logical values** (percent, watts, 0/1), not raw register numbers. There is no public `/ECRamReadByte` HTTP route; `ECRamReadByte` / `ECRamDirectWrite` stay inside CompatLayerCT after init.
+Init routes put **encoded EC addresses** in the path (`encoded = 0x400 + reg`). Later get/set routes send **logical values** (percent, watts, 0/1), not raw register numbers. There is no public `/ECRamReadByte` HTTP route; `ECRamReadByte` / `ECRamDirectWrite` stay inside CompatLayerCT after the address table is filled.
+
+## What init actually does
+
+These calls are **userspace bookkeeping inside `CompatLayerCT.exe`**. They do not handshake the EC firmware and (except as noted) they do not write EC RAM.
+
+Two layers:
+
+| Layer | Call | What it does | Needed before raw EC R/W? |
+|---|---|---|---|
+| Backend | `/func/setECAccessType/{1\|2}` → `InitEC` / `FreeEC` | Pick WinRing0 vs OxpWMI and open that backend (`InitializeOls` or WMI `SuRwECRegInterface`). | Only if you use CompatLayerCT’s own `ECRamReadByte`. Direct WMI / ACPI EC / `ec_sys` does **not** need this. |
+| Address table | `initBaseEc`, `fan/init`, `initHandleEc`, `initOXPSensorEc`, `battery/initEc`, `initPowerSupplyModeEC` | Copy encoded offsets and constants into static fields (`EC_ADDR_FAN_SPEED_H`, `EC_VALUE_FAN_AUTOMATE_ON`, …). | **No.** The EC already has those bytes. You already know the map. |
+| UI only | `/tdp/init/{min}/{max}/{maxBoost}` | Store watt bounds for the slider. | No. Not an EC register. |
+
+Startup order in `background.js` (`Global step1` → `step8`):
+
+1. DMI `getSimpleDeviceInfo` → override `ecAccessType` and the address variables (`w,k,C,x,S,L,T,A,E,O,M,z,D,…`).
+2. `setECAccessType` (then unpack `wr0_build.7z` if type `1`).
+3. `initBaseEc` → `fan/init` → `initHandleEc` → `initOXPSensorEc` (and `initPowerSupplyModeEC` if `powerSupplyMode`).
+4. Later, if `enableBatteryProtection`: `battery/initEc`, then apply saved `chargeLimit` / `byPassPowerMode` (those two **are** writes).
+
+So OneXConsole inits **before its own** `/fan/getFanSpeed` / `/battery/setChargeLimit`, because those routes have no address in the URL. They read `EC_ADDR_*` that init stored.
+
+### Field each init fills
+
+| Init | CompatLayerCT fields | Typical G3E (X2 Mini) | Typical AMD (Mini PRO) |
+|---|---|---|---|
+| `initBaseEc` | `EC_ADDR_APP_FUN_EN`, `EC_ADDR_FAN_SPEED_H/L` | `0xEB`, `0x58`/`0x59` | `0xF1`, `0x76`/`0x77` |
+| `fan/init` | `EC_ADDR_FAN_AUTOMATE` + on/off values, `EC_ADDR_FAN_SPEED`, `FAN_MAX_SPEED_VALUE` | `0x4A` 0/1, `0x4B`, max 184 | same addrs, max 255 |
+| `initHandleEc` | `EC_ADDR_HANDLE_POWER` + on/off/restore values | `0x2D`, 1 / 0 / −1 | same |
+| `initOXPSensorEc` | board/CPU/battery/current addrs | `0x60`/`0x61`/`0x70`/`0xA0`/`0xA1`/`0xA2` | same |
+| `battery/initEc` | charge / bypass / force-min addrs + bypass values | `0xA3`–`0xA5`, 0/1/3 | `0xE5`–`0xE7`, 0/1/3 |
+| `initPowerSupplyModeEC` | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | `0xE3` |
+
+`EC_ADDR_OXP_SET_TDP_ABLE` (`0xED`) is **not** passed in any init URL. `getOXPSetTdpAble` uses a built-in offset.
+
+### Do you need init before read/write?
+
+| What you are calling | Init first? |
+|---|---|
+| WMI `ReadECReg` / `WriteECReg` with a known `GroupOffset` (X2 Mini PowerShell) | **No.** |
+| Linux `ec_read` / `ec_write` / `ec_sys` `/sys/kernel/debug/ec/ec0/io` | **No.** |
+| CompatLayerCT `ECRamReadByte(0x400+reg)` after you already called `setECAccessType` | Address-table init **not** required; backend init is. |
+| HTTP `/fan/getFanSpeed`, `/fan/setFanSpeed/{n}`, `/battery/setChargeLimit/{n}`, `/func/getOXPSensorInfo` | **Yes**, the matching `init*` (or just let OneXConsole finish startup). Without it the helper has no `EC_ADDR_*` and the call is meaningless or uses leftover defaults (AMD `0xF1`/`0x76`/`0x77` / charge `0xA3`). |
+| `/msr/setCpuPl` / `/ryzenadj/setCpuPl` | No EC init. Optional `/func/getOXPSetTdpAble` is only a gate read. |
+
+Watching F12/proxy: the `init*` lines are how you learn **which registers this SKU uses**. The later `get*`/`set*` lines are how you learn **which values** the UI writes. You do not replay `init*` against the EC itself.
 
 ## EC-related routes
 
