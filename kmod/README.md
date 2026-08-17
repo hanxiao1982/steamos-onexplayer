@@ -26,7 +26,10 @@ Bazzite 一键：`sudo kmod/scripts/install-bazzite.sh`（需要匹配的 kernel
 掌机已开 SSH 时，在**电脑**上拷过去并远程执行（详见 [docs/ssh-deploy.md](../docs/ssh-deploy.md)）：
 
 ```bash
+kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 check   # 先看 headers / 编译器 / SB
 kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 all
 ```
+
+真机上也可直接：`kmod/scripts/check-env.sh`
 
 `kmod/local-device.env` 仍可作为额外一份（兼容旧流程）；正式积累请用 `kmod/devices/`。

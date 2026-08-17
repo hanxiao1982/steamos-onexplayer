@@ -55,8 +55,11 @@ Bazzite 额外检查：
 cd /path/to/steamos-onexplayer
 chmod +x kmod/scripts/*.sh kmod/scripts/*.py
 
-# 整段：拷仓库 → 真机 --add 一份 devices/<slug>.env → 编译安装 → 把新 .env 拉回电脑
+# 整段：拷仓库 → 检查开发环境 → 真机 --add → 编译安装 → 把新 .env 拉回电脑
 kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 all
+
+# 只检查、不安装（仓库还没拷过去也会把 check-env.sh 经 SSH 灌进去）
+kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 check
 ```
 
 X1 / G1 等不要用默认 `oxp_fly` 时：
@@ -71,7 +74,7 @@ OXP_BOARD_VARIANT=oxp_x1 kmod/scripts/ssh-handheld.sh user@192.168.1.50 all
 ```bash
 H=bazzite@192.168.1.50
 kmod/scripts/ssh-handheld.sh "$H" push
-kmod/scripts/ssh-handheld.sh "$H" status
+kmod/scripts/ssh-handheld.sh "$H" check          # 或缺 headers / SB / 编译器时在这里停
 kmod/scripts/ssh-handheld.sh "$H" collect --add
 kmod/scripts/ssh-handheld.sh "$H" install
 kmod/scripts/ssh-handheld.sh "$H" pull-devices
@@ -80,12 +83,23 @@ kmod/scripts/ssh-handheld.sh "$H" pull-devices
 | 子命令 | 做什么 |
 | --- | --- |
 | `push` | 把仓库拷到掌机 `~/steamos-onexplayer`（不含 `.git`、不含已编的 `.ko`） |
-| `collect` | 远程跑 `collect-dmi.sh`（默认 `--add`，只追加这一台） |
-| `install` | 远程 `sudo on-device-install.sh`（辨认 Bazzite / CachyOS，编模块 + InputPlumber） |
+| `check` / `status` | SSH 进去后跑 `check-env.sh`：发行版、DMI、python、curl/GitHub、make/gcc 或 clang、内核头文件、pahole、Secure Boot、sudo、InputPlumber |
+| `collect` | 先 `--collect-only` 检查，再远程 `collect-dmi.sh`（默认 `--add`） |
+| `install` | 先完整环境检查，再 `sudo on-device-install.sh` |
 | `pull-devices` | 把掌机上的 `kmod/devices/*.env` 拉回电脑，和其它型号放一起 |
-| `status` | 发行版、内核、headers、Secure Boot、已有目录 |
-| `all` | `push` + `collect --add` + `install` + `pull-devices` |
+| `all` | `push` + `check` + `collect --add` + `install` + `pull-devices`；有 `[FAIL]` 会停下来不装 |
 | `run -- cmd` | 在掌机仓库目录执行任意命令 |
+
+`check` 会逐项打印 `[OK]` / `[WARN]` / `[FAIL]`。Bazzite 缺与 `uname -r` 一致的 `kernel-devel`、开着 Secure Boot，会直接 `[FAIL]` 并中止 `install` / `all`。CachyOS 缺 headers / `base-devel` 一般是 `[WARN]`（`install-cachyos.sh` 会 `pacman` 补上）；`OXP_CHECK_STRICT=1` 时这些也算失败。跳过检查：`OXP_SKIP_CHECK=1`。
+
+手写等价：
+
+```bash
+# 仓库还没拷过去也可以
+ssh bazzite@192.168.1.50 'bash -s' < kmod/scripts/check-env.sh
+# 已经 push 之后
+ssh bazzite@192.168.1.50 '~/steamos-onexplayer/kmod/scripts/check-env.sh'
+```
 
 非 22 端口或指定密钥：
 
@@ -238,7 +252,8 @@ kmod/scripts/ssh-handheld.sh "$H" install
 | `Permission denied` | 用户名/密钥/密码；`ssh-copy-id` |
 | `Connection refused` | 掌机未开 `sshd`，或防火墙/AP 隔离 |
 | `collect-dmi` 报 UNKNOWN | 不在真机上，或 DMI sysfs 不可读 |
-| `kernel-headers=NO` | CachyOS：`sudo pacman -S linux-cachyos-deckify-headers`；Bazzite：装匹配的 OGC `kernel-devel` 后重启 |
+| `check` 出现 `[FAIL] 内核头文件` | CachyOS：`sudo pacman -S linux-cachyos-deckify-headers`（非 `--strict` 时只警告，install 会代装）；Bazzite：先装匹配的 OGC `kernel-devel` 再重启 |
+| `check` 出现 `[FAIL] Secure Boot` | 固件里关掉 SB，或自签 MOK |
 | `Key was rejected` / Secure Boot | 关 SB，或自签 MOK（`ujust enroll-secure-boot-key` 签不了你的本地模块） |
 | `Invalid module format` | headers 的 vermagic ≠ `uname -r` |
 | `InputPlumber device dir not found` | 镜像未装 InputPlumber：CachyOS `sudo pacman -S inputplumber` |

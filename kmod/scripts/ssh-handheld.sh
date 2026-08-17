@@ -14,8 +14,9 @@ Usage (on your PC, not on the handheld):
   ssh-handheld.sh user@host collect [--add [slug]] [--force]
   ssh-handheld.sh user@host pull-devices
   ssh-handheld.sh user@host install
-  ssh-handheld.sh user@host status
-  ssh-handheld.sh user@host all              # push + collect --add + install + pull-devices
+  ssh-handheld.sh user@host check            # SSH 后检查编译/采集环境（可先于 push）
+  ssh-handheld.sh user@host status           # 同 check
+  ssh-handheld.sh user@host all              # push + check + collect --add + install + pull-devices
   ssh-handheld.sh user@host run -- <cmd>     # remote shell in the copied repo
 
 Environment:
@@ -25,6 +26,8 @@ Environment:
   OXP_BOARD_VARIANT   Passed to collect-dmi.sh (default on device: oxp_fly)
   OXP_CAP_MAP         Passed to collect-dmi.sh (default: oxp8)
   OXP_PUSH_SOURCE=1   Also copy kmod/oxpec/oxpec.c (handheld cannot reach GitHub)
+  OXP_SKIP_CHECK=1    Skip check-env.sh before collect/install
+  OXP_CHECK_STRICT=1  check-env.sh --strict (auto-fixable gaps become FAIL)
 
 Examples:
   kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 all
@@ -107,6 +110,9 @@ push_repo() {
 }
 
 collect_dmi() {
+  if [[ "${OXP_SKIP_CHECK:-0}" != 1 ]]; then
+    do_check --collect-only || return 1
+  fi
   local args=()
   if [[ $# -eq 0 ]]; then
     args=(--add)
@@ -139,39 +145,36 @@ pull_devices() {
   ls -1 "${ROOT}/kmod/devices/"*.env
 }
 
-do_install() {
-  echo "install on ${HOST} (sudo)"
-  ssh_t "$HOST" "cd ${REMOTE_ABS} && sudo ./kmod/scripts/on-device-install.sh"
+check_args() {
+  local extra=()
+  if [[ "${OXP_CHECK_STRICT:-0}" == 1 ]]; then
+    extra+=(--strict)
+  fi
+  extra+=("$@")
+  printf '%s' "${extra[*]}"
 }
 
-do_status() {
-  ssh_r "$HOST" "bash -s" <<EOF
-set -e
-cd ${REMOTE_ABS} 2>/dev/null || { echo "repo not copied yet"; exit 1; }
-if [[ -r /usr/lib/os-release ]]; then . /usr/lib/os-release; else . /etc/os-release; fi
-echo "host=\$(hostname) user=\$(whoami)"
-echo "distro=\${PRETTY_NAME:-unknown} id=\${ID:-}"
-echo "kernel=\$(uname -r)"
-if command -v mokutil >/dev/null; then
-  echo "secureboot=\$(mokutil --sb-state 2>/dev/null | head -n1 || true)"
-else
-  echo "secureboot=n/a"
-fi
-krel=\$(uname -r)
-if [[ -d /lib/modules/\$krel/build ]]; then
-  echo "kernel-headers=yes (/lib/modules/\$krel/build)"
-else
-  echo "kernel-headers=NO  (Bazzite needs matching kernel-devel; CachyOS: linux-cachyos-deckify-headers)"
-fi
-echo "catalog:"
-ls -1 kmod/devices/*.env 2>/dev/null || echo "  (none)"
-if [[ -e /var/lib/oxp-kmod/oxpec.ko ]]; then
-  echo "installed-ko=/var/lib/oxp-kmod/oxpec.ko"
-else
-  echo "installed-ko=missing"
-fi
-systemctl is-enabled oxpec-local.service 2>/dev/null | sed 's/^/oxpec-local=/' || true
-EOF
+do_check() {
+  local extra
+  extra="$(check_args "$@")"
+  echo "check env on ${HOST}..."
+  if ssh_r "$HOST" "test -f ${REMOTE_ABS}/kmod/scripts/check-env.sh"; then
+    # shellcheck disable=SC2086
+    ssh_r "$HOST" "chmod +x ${REMOTE_ABS}/kmod/scripts/check-env.sh && ${REMOTE_ABS}/kmod/scripts/check-env.sh ${extra}"
+  else
+    echo "(repo not on device yet; piping check-env.sh over SSH)"
+    # shellcheck disable=SC2086
+    ssh_r "$HOST" "bash -s -- ${extra}" < "${ROOT}/kmod/scripts/check-env.sh"
+  fi
+}
+
+do_install() {
+  if [[ "${OXP_SKIP_CHECK:-0}" != 1 ]]; then
+    do_check || return 1
+  fi
+  echo "install on ${HOST} (sudo)"
+  # Already probed on the PC side; do not run check-env.sh a second time under sudo.
+  ssh_t "$HOST" "cd ${REMOTE_ABS} && sudo OXP_SKIP_CHECK=1 ./kmod/scripts/on-device-install.sh"
 }
 
 case "$CMD" in
@@ -187,13 +190,14 @@ case "$CMD" in
   install)
     do_install
     ;;
-  status)
-    do_status
+  check|status)
+    do_check "$@"
     ;;
   all)
     push_repo
-    collect_dmi --add
-    do_install
+    do_check
+    OXP_SKIP_CHECK=1 collect_dmi --add
+    OXP_SKIP_CHECK=1 do_install
     pull_devices
     ;;
   run)

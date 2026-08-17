@@ -9,6 +9,11 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+if [[ "${OXP_SKIP_CHECK:-0}" != 1 ]]; then
+  echo "checking build environment..."
+  "${ROOT}/kmod/scripts/check-env.sh" || exit 1
+fi
+
 if [[ -r /usr/lib/os-release ]]; then
   # shellcheck disable=SC1091
   . /usr/lib/os-release

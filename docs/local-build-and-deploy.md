@@ -294,7 +294,7 @@ Bazzite 是 ostree 镜像，内核来自 OGC 签名 RPM。本地重编整核需�
 kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 all
 ```
 
-这会 rsync/tar 拷仓库、远程 `collect-dmi.sh --add`、辨认 Bazzite/CachyOS 后编译安装，再把新的 `devices/*.env` 拉回电脑。完整命令、手写 ssh/scp、离线掌机见 [ssh-deploy.md](ssh-deploy.md)。
+这会 rsync/tar 拷仓库、先跑 `check-env.sh`（内核头文件、gcc/clang、Secure Boot、DMI、GitHub 等），再远程 `collect-dmi.sh --add`、辨认 Bazzite/CachyOS 后编译安装，最后把新的 `devices/*.env` 拉回电脑。有 `[FAIL]` 会停。完整命令、手写 ssh/scp、离线掌机见 [ssh-deploy.md](ssh-deploy.md)。
 
 ---
 
