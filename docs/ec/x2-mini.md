@@ -23,10 +23,10 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 
 | Function | CompatLayerCT field | Register | Values |
 |---|---|---|---|
-| Fan RPM high | `EC_ADDR_FAN_SPEED_H` | `0x58` | 16-bit BE with next byte |
+| Fan RPM high | `EC_ADDR_FAN_SPEED_H` | `0x58` | **Live:** BE16 with `0x59`, matches UI RPM |
 | Fan RPM low | `EC_ADDR_FAN_SPEED_L` | `0x59` | |
-| PWM enable / auto | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | `0` auto, `1` manual |
-| PWM duty | `EC_ADDR_FAN_SPEED` | `0x4B` | **0–184** |
+| PWM enable / auto | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | **Live:** `0` auto, `1` manual (UI profiles 1 and 2 both write `1`) |
+| PWM duty | `EC_ADDR_FAN_SPEED` | `0x4B` | **Live:** 0–184; UI % = `4B×100/184` (raw byte not shown) |
 | Turbo / app-fun | `EC_ADDR_APP_FUN_EN` | `0xEB` | Linux `oxpec` mask `0x40` |
 | Handle power | `EC_ADDR_HANDLE_POWER` | `0x2D` | on=`1`, off=`0` (restore unused, `-1`) |
 | Charge limit % | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | **Live:** UI 50–100 step 5 writes this byte |
@@ -36,7 +36,7 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 | TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | watts via Intel MSR |
 | Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | |
 | Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | |
-| CPU temp | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | |
+| CPU temp | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | **Live:** °C, matches UI |
 | Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | |
 | Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | **Ignore:** live BE16 always `0` |
 
