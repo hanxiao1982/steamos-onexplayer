@@ -39,7 +39,8 @@ encoded = 0x400 + ec_reg    # example: PWM 0x4A → 1098 (0x44A)
 | Backend | How the encoded value is used |
 |---|---|
 | WinRing0 Origin | Strip to 8-bit (`encoded & 0xFF`) and talk ACPI EC ports |
-| OxpWMI | Keep 16-bit as WMI `GroupOffset` (group `0x04`, offset = register) |
+| OxpWMI (JS / CompatLayerCT) | Logical `0x400 + reg` (group `0x04` in the high byte of a 16-bit view) |
+| OxpWMI (actual WMI UInt32, X2 Mini) | Little-endian **byte0 = group `0x04`, byte1 = reg**: `GroupOffset = 0x04 \| (reg << 8)` (fan `0x58` → `0x5804`). Passing `0x458` is rejected (AML sees group `0x58`). |
 
 Range checks next to the WMI strings: `N` (group) max `0x0F`, `OFFR` (offset) range-checked. That matches a banked EC window, not a flat 256-byte space.
 
@@ -84,9 +85,17 @@ WMI, not port I/O.
 | Write | `WriteECReg` in-param `GroupOffsetValue` |
 | Out fields seen | `uStringReturn` (8 bytes), `ReturnValue` |
 
-`GroupOffset` is the 16-bit encoded address (`0x4xx`). Read result is an 8-byte block (`uStringReturn`; OneXConsole also accepts `^[0-9A-F]{16}$`). The register byte is taken from that block (first byte is the working hypothesis).
+`GroupOffset` is `UInt32`. On the wire it is little-endian; firmware uses **byte0 = group, byte1 = offset**. CompatLayerCT’s JS `0x400+reg` must be byteswapped before the WMI call (`0x458` → `0x5804`).
 
-X2 Mini probe: `ReadECReg(0x458)` → `ReturnValue=True`, `uStringReturn=0xFF,0x00,…`. Method path is live; `0xFF` at fan high is not yet a validated RPM. See [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini).
+`uStringReturn` is 8 bytes (OneXConsole also accepts `^[0-9A-F]{16}$`):
+
+| Byte | Meaning (X2 Mini) |
+|---|---|
+| 0 | Status: `0x00` ok, `0xFF` fail (bad group / unused) |
+| 1 | EC RAM byte |
+| 2–7 | `0x00` on single-byte reads |
+
+Confirmed reads: [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini). `WriteECReg` `GroupOffsetValue` packing is not probed yet (do not write blindly).
 
 Generic WMI helper errors mention `outParams["Data"]`, `dataOut["Bytes"]`, `iDataBlockIndex`, `fullPackage` — a shared ACPI-WMI invoker, not a second EC protocol.
 

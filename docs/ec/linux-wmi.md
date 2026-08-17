@@ -103,7 +103,7 @@ Not the same ABI. Do **not** bind `msi-wmi-platform` to a OneXPlayer DMI id.
 | GUID | `43B5A593-AD62-4257-8546-91B0797BEC1B` (X2 Mini Windows `guid` qualifier) | `ABBC0F6E-8EA1-11D1-00A0-C90629100000` |
 | Read | `ReadECReg(GroupOffset)` | `Get_Data` / `Get_Fan` / … |
 | Write | `WriteECReg(GroupOffsetValue)` | `Set_Data` / `Set_Fan` / … |
-| Address | 16-bit `0x400 + reg` (group `0x04`) | 8-bit `buffer[0]` (or fan subfeature) |
+| Address | UInt32 LE `04 reg 00 00` (JS still writes `0x400+reg`) | 8-bit `buffer[0]` (or fan subfeature) |
 | Payload | hex string / 8-byte block in out-params | fixed 32-byte ACPI buffer |
 | Fan | EC `0x58`/`0x59` (BE16 RPM) | `Get_Fan` raw, `480000/raw` |
 | TDP | EC gate `0xED` + Intel MSR | WMI `0x50`/`0x51` watts |
@@ -117,28 +117,45 @@ Confirmed on X2 Mini (Windows `Get-CimClass` qualifier `guid`):
 
 `43B5A593-AD62-4257-8546-91B0797BEC1B`
 
-That is **not** the MSI/Microsoft sample `ABBC0F6E-…`. `msi-wmi-platform` must not bind to OneXPlayer. Linux `wmi_device_id` should use the 43B5… GUID (uppercase). Still need `WmiMethodId` for `ReadECReg` / `WriteECReg` from `CimClassMethods` or `bmf2mof`.
+That is **not** the MSI/Microsoft sample `ABBC0F6E-…`. `msi-wmi-platform` must not bind to OneXPlayer. Linux `wmi_device_id` should use the 43B5… GUID (uppercase). Still need `WmiMethodId` for `ReadECReg` / `WriteECReg`.
 
 ### Windows probe (X2 Mini)
 
-`ReadECReg` with `GroupOffset = 0x458` (`0x400 + 0x58` fan high) returned `ReturnValue = True` and
+Instance: `ACPI\PNP0C14\RWECREGWMI_0`.
+
+| Method | In | Out |
+|---|---|---|
+| `ReadECReg` | `GroupOffset` `UInt32` | `uStringReturn` string (8 bytes) |
+| `WriteECReg` (and one peer) | `GroupOffsetValue` `UInt32` | `uStringReturn` string |
+
+`GroupOffset` packing that works:
 
 ```
-uStringReturn = 0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+uint32 LE:  [0x04] [reg] [0x00] [0x00]
+value     =  0x04 | (reg << 8)     # 0x58 → 0x5804
 ```
 
-That matches the 8-byte block OneXConsole parses. **`ReturnValue True` only means the WMI method ran**, not that `0xFF` is a real RPM. `0xFF00` is not a plausible fan speed; `0xFF` is also the usual “empty / unused / not updating” EC value.
+JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStringReturn` all `0xFF,…`, status byte `0xFF`).
 
-Schema from the same unit:
+`uStringReturn` on a good read:
 
-- Instance: `ACPI\PNP0C14\RWECREGWMI_0`
-- `ReadECReg(GroupOffset: UInt32)` → `uStringReturn: String`
-- `WriteECReg(GroupOffsetValue: UInt32)` → `uStringReturn: String` (a second method uses the same in/out names)
-- Out-params are only `uStringReturn` (+ CIM `ReturnValue`). No separate `Data`/`Bytes` field.
+```
+[0] = 0x00   status ok
+[1] = value  EC RAM byte
+[2..7] = 0
+```
 
-`0x58` / `0x59` / `0x4A` / `0x4B` / `0x70` / `0x60` as `0x400+reg` (e.g. `0x458`) and as raw `0x58` all returned the **same** `0xFF,0x00,…`. `ReturnValue=True` only means the WMI method ran.
+| Reg | `GroupOffset` | Byte[1] | Meaning |
+|---|---|---|---|
+| `0x58` | `0x5804` | `0x01` | fan RPM high |
+| `0x59` | `0x5904` | `0x40` | fan RPM low → BE16 `0x0140` = **320 RPM** |
+| `0x4A` | `0x4A04` | `0x00` | PWM auto |
+| `0x4B` | `0x4B04` | `0x25` | PWM duty **37** (range 0–184) |
+| `0x70` | `0x7004` | `0x31` | EC CPU temp **49 °C** |
+| `0x60` | `0x6004` | `0x2A` | board sensor **42 °C** |
+| `0xA0` | `0xA004` | `0x00` | battery temp 0 (idle / unused / other scale) |
 
-Likely cause: AML reads **byte 0 = group, byte 1 = offset** from the little-endian UInt32. `0x458` is stored as `58 04 00 00`, so group becomes `0x58` which is `> 0x0F` (OneXConsole’s group max). Firmware then returns the dummy `0xFF` block. The packing to try is `GroupOffset = 0x04 | (reg << 8)` (`0x58` → `0x5804` → bytes `04 58 00 00`). `WmiMethodId` is still missing from the dump.
+Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI path are validated for **read**. `WriteECReg` packing and `WmiMethodId` are still open.
 
 ## What to reuse for an OxpWMI Linux backend
 
@@ -146,7 +163,7 @@ Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
 1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
 2. `wmidev_evaluate_method(wdev, instance, method_id, in, out)` with a driver mutex.
-3. Map OneXConsole `ReadECReg` / `WriteECReg` onto those method IDs and the 16-bit `GroupOffset` (`0x400 + reg`).
+3. Map `ReadECReg` / `WriteECReg` onto those method IDs. Input is a 4-byte little-endian `UInt32`: `0x04, reg, 0, 0`. Parse output byte[0] as status, byte[1] as the register. Do **not** pass JS `0x400+reg` as the UInt32.
 4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, `0xEB` turbo, PWM 0–184, charge `0xA3`–`0xA5`).
 5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
 
