@@ -40,7 +40,7 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 | Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | |
 | Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | **Ignore:** live BE16 always `0` |
 
-`fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2`.
+`fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2`. Read-only WMI probe: [fan.md](fan.md).
 
 ## Init (OneXConsole)
 

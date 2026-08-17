@@ -45,3 +45,4 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
 - [maps.yaml](maps.yaml) — machine-readable tables
 - [charge.md](charge.md) — charge-limit / bypass / force-min ranges and read-only probe
+- [fan.md](fan.md) — fan PWM / RPM read-only probe (X2 Mini)
