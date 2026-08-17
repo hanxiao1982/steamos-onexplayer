@@ -11,4 +11,5 @@ OneXPlayer 掌机在类 SteamOS 发行版上的适配笔记。
 不等主线合入时，用树外模块在两边本地编译、测试、安装：
 
 - [docs/local-build-and-deploy.md](docs/local-build-and-deploy.md)
+- 掌机能 SSH 时，从电脑拷仓库并远程跑完整步骤：[docs/ssh-deploy.md](docs/ssh-deploy.md)
 - 工具：`kmod/`

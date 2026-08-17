@@ -286,7 +286,19 @@ Bazzite 是 ostree 镜像，内核来自 OGC 签名 RPM。本地重编整核需�
 
 ---
 
-## 9. 推荐工作顺序
+## 9. 用 SSH 从电脑拷到掌机
+
+掌机能 SSH 登入时，不必在掌机屏幕上操作。电脑上：
+
+```bash
+kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 all
+```
+
+这会 rsync/tar 拷仓库、远程 `collect-dmi.sh --add`、辨认 Bazzite/CachyOS 后编译安装，再把新的 `devices/*.env` 拉回电脑。完整命令、手写 ssh/scp、离线掌机见 [ssh-deploy.md](ssh-deploy.md)。
+
+---
+
+## 10. 推荐工作顺序
 
 ```
 真机 collect-dmi.sh --add          # 只追加这一台
