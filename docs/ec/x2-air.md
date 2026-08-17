@@ -1,21 +1,8 @@
-# “X2 Air” and related 2026 models
+# X2 (and the “X2 Air” name)
 
-## Naming
+OneXConsole **0.10.2-fix8** has no `X2 Air` / `X2Air` product string. The 2026 Air handheld is documented separately as [Apex Air](apex-air.md). OneXPlayer 3 is [onexplayer-3.md](onexplayer-3.md).
 
-OneXConsole **0.10.2-fix8** product table has **no** X2 Air SKU:
-
-```
-ONEXPLAYER X2
-ONEXPLAYER X2 EVA
-ONEXPLAYER X2Mini
-ONEXPLAYER X2Mini PRO
-ONEXPLAYER Apex Air      # the 2026 “Air” handheld
-ONEXPLAYER Apex i
-```
-
-Official 2026 summer lineup is X2 (10.95" 3-in-1), X2 Mini, and **Apex Air** (ONEXFLY-class 8" Intel handheld). If “X2 Air” was meant as that Air model, use the Apex Air map below. If it was meant as the large X2 tablet, that map is listed as well.
-
-Both are **Intel X2-class** and share the same EC offsets as [X2 Mini](x2-mini-series.md) (not X2 Mini PRO).
+This page is only the large 10.95" 3-in-1: `ONEXPLAYER X2` / `ONEXPLAYER X2 EVA`. It uses the same Intel X2-class EC offsets as X2 Mini / Apex Air / OneXPlayer 3 (not X2 Mini PRO).
 
 ## ONEXPLAYER X2 / X2 EVA
 
@@ -48,25 +35,7 @@ EC offsets: identical to X2 Mini.
 
 JS overrides: `w=1259, k=1112, C=1113, A=184, N=3, E=1069, I=1, R=0`.
 
-## ONEXPLAYER Apex Air
-
-| Item | Value |
-|---|---|
-| DMI `Product` | `ONEXPLAYER Apex Air` (same branch as `ONEXPLAYER Apex i`) |
-| CPU | forced `Intel` |
-| `ecAccessType` | 2 (OxpWMI) |
-| Screen | landscape |
-| TDP | default slider 25 W; boost 46 W or 66 W depending on an internal SKU flag `v`; QC maps go up to 45/65 W |
-| PWM max | 184 |
-| Handle image key | `APEX` |
-
-EC offsets: **same Intel X2-class table as X2 Mini / X2**.
-
-JS overrides: `w=1259, k=1112, C=1113, A=184, N=3, E=1069, I=1, R=0`.
-
-Apex Air does **not** use the AMD APEX / X2 Mini PRO charge registers `0xE5–0xE7`. Those belong to `ONEXPLAYER APEX` and `ONEXPLAYER X2Mini PRO` only.
-
-## What is not EC on these machines
+## What is not EC on this machine
 
 - TDP PL1/PL2/PL4: Intel MSR (`intelTdpSetType`, `/msr/setCpuPl`)
 - RGB: HID `CommonHid` (`/programhandle/rgb/*`)

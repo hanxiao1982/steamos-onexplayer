@@ -43,7 +43,7 @@ bypass_x2: &bypass_x2
 families:
   intel_x2_class:
     description: >
-      X2 Mini, X2, X2 EVA, Apex i, Apex Air.
+      X2 Mini, X2, X2 EVA, OneXPlayer 3, Apex i, Apex Air.
       Same layout as Linux oxpec oxp_2 / oxp_x1 for fan and turbo.
     access: oxpwmi
     ec_access_type: 2
@@ -112,15 +112,34 @@ models:
 
   - id: apex-air
     product: ONEXPLAYER Apex Air
-    marketing: Apex Air (2026 Air handheld; not named X2 Air in software)
+    marketing: Apex Air
     cpu: Intel
     family: intel_x2_class
     aliases: [ONEXPLAYER Apex i]
     tdp:
       default: 25
+      plugin: 35
       boost_low_sku: 46
       boost_high_sku: 66
       via: intel-msr
+    notes:
+      - Same detect branch as Apex i; EC offsets identical
+      - Charge regs are 0xA3-0xA5, not AMD APEX 0xE5-0xE7
+
+  - id: onexplayer-3
+    product: ONEXPLAYER 3
+    marketing: OneXPlayer 3
+    cpu: Intel
+    family: intel_x2_class
+    tdp:
+      max: 35
+      boost: 36
+      unlock: 40
+      default: 25
+      via: intel-msr
+    notes:
+      - Handle image key OXP3; RGB partition mode
+      - No EVA/Pro/i product string in 0.10.2-fix8
 
 not_found:
   - X2 Air
