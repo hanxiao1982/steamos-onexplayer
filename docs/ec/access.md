@@ -81,9 +81,10 @@ WMI, not port I/O.
 | Scope | `root\WMI` (`\\.\root\wmi`) |
 | Class | `SuRwECRegInterface` (`SELECT * FROM SuRwECRegInterface`) |
 | GUID | `43B5A593-AD62-4257-8546-91B0797BEC1B` (X2 Mini class qualifier) |
-| Read | `ReadECReg` in-param `GroupOffset` |
-| Write | `WriteECReg` in-param `GroupOffsetValue` |
-| Out fields seen | `uStringReturn` (8 bytes), `ReturnValue` |
+| Read | `ReadECReg` (`WmiMethodId=1`), in `GroupOffset` `UInt32` |
+| Write | `WriteECReg` (`WmiMethodId=2`), in `GroupOffsetValue` `UInt32` |
+| Write+read | `WriteReadECReg` (`WmiMethodId=3`), same in-param as write; MOF: write one, return several regs |
+| Out | `uStringReturn` (8 bytes); CIM also adds `ReturnValue` |
 
 `GroupOffset` is `UInt32`. On the wire it is little-endian; firmware uses **byte0 = group, byte1 = offset**. CompatLayerCT’s JS `0x400+reg` must be byteswapped before the WMI call (`0x458` → `0x5804`).
 
@@ -95,7 +96,7 @@ WMI, not port I/O.
 | 1 | EC RAM byte |
 | 2–7 | `0x00` on single-byte reads |
 
-Confirmed reads: [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini). `WriteECReg` `GroupOffsetValue` packing is not probed yet (do not write blindly).
+Confirmed reads: [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini). `WriteECReg` / `WriteReadECReg` likely `04, reg, value, 00` (`value` in byte2). Not probed; do not write blindly.
 
 Generic WMI helper errors mention `outParams["Data"]`, `dataOut["Bytes"]`, `iDataBlockIndex`, `fullPackage` — a shared ACPI-WMI invoker, not a second EC protocol.
 

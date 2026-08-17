@@ -117,16 +117,17 @@ Confirmed on X2 Mini (Windows `Get-CimClass` qualifier `guid`):
 
 `43B5A593-AD62-4257-8546-91B0797BEC1B`
 
-That is **not** the MSI/Microsoft sample `ABBC0F6E-…`. `msi-wmi-platform` must not bind to OneXPlayer. Linux `wmi_device_id` should use the 43B5… GUID (uppercase). Still need `WmiMethodId` for `ReadECReg` / `WriteECReg`.
+That is **not** the MSI/Microsoft sample `ABBC0F6E-…`. `msi-wmi-platform` must not bind to OneXPlayer. Linux `wmi_device_id` should use the 43B5… GUID (uppercase).
 
 ### Windows probe (X2 Mini)
 
 Instance: `ACPI\PNP0C14\RWECREGWMI_0`.
 
-| Method | In | Out |
-|---|---|---|
-| `ReadECReg` | `GroupOffset` `UInt32` | `uStringReturn` string (8 bytes) |
-| `WriteECReg` (and one peer) | `GroupOffsetValue` `UInt32` | `uStringReturn` string |
+| Method | `WmiMethodId` | In (`ID=0`) | Out (`ID=1`) |
+|---|---|---|---|
+| `ReadECReg` | **1** | `GroupOffset` `UInt32` | `uStringReturn` string (8 bytes) |
+| `WriteECReg` | **2** | `GroupOffsetValue` `UInt32` | `uStringReturn` string |
+| `WriteReadECReg` | **3** | `GroupOffsetValue` `UInt32` | `uStringReturn` string (“write one, return multi-register values”) |
 
 `GroupOffset` packing that works:
 
@@ -155,15 +156,24 @@ JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStri
 | `0x60` | `0x6004` | `0x2A` | board sensor **42 °C** |
 | `0xA0` | `0xA004` | `0x00` | battery temp 0 (idle / unused / other scale) |
 
-Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI path are validated for **read**. `WriteECReg` packing and `WmiMethodId` are still open.
+Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI **read** path are validated.
+
+`WriteECReg` / `WriteReadECReg` packing is not probed. Hypothesis (same LE layout, extra value byte):
+
+```
+GroupOffsetValue = 0x04 | (reg << 8) | (value << 16)
+# bytes: 04, reg, value, 00
+```
+
+Do not write until that is confirmed. Method 3 may fill more of the 8-byte return (consecutive regs). `WmiMethodId` for Linux is **1 / 2 / 3**.
 
 ## What to reuse for an OxpWMI Linux backend
 
 Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
 1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
-2. `wmidev_evaluate_method(wdev, instance, method_id, in, out)` with a driver mutex.
-3. Map `ReadECReg` / `WriteECReg` onto those method IDs. Input is a 4-byte little-endian `UInt32`: `0x04, reg, 0, 0`. Parse output byte[0] as status, byte[1] as the register. Do **not** pass JS `0x400+reg` as the UInt32.
+2. `wmidev_evaluate_method(wdev, 0, method_id, in, out)` with a driver mutex. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
+3. Input is a 4-byte little-endian `UInt32`: read `04, reg, 0, 0`; write likely `04, reg, value, 0`. Parse output byte[0] as status, byte[1] as the register. Do **not** pass JS `0x400+reg` as the UInt32.
 4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, `0xEB` turbo, PWM 0–184, charge `0xA3`–`0xA5`).
 5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
 
@@ -274,4 +284,4 @@ iasl -d *.dat
 
 GUID 只是 `wmi_device_id`。还要 MOF / Windows 方法限定符里的 **`WmiMethodId`**（`ReadECReg` / `WriteECReg` 各一个整数），以及入参是 16 位 `GroupOffset` 还是包在 buffer 里。这些在乱码的 `bmfdec` 输出里没有；用第 1 节的 `CimClassMethods` 或第 0 节 `bmf2mof` 后的 `[WmiMethodId(n)]`。
 
-GUID is known on X2 Mini. Linux still needs the `WmiMethodId` integers and a confirmed parse of `uStringReturn` (which byte is the register). `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.
+GUID, method IDs (1/2/3), `GroupOffset` packing, and `uStringReturn` layout are known on X2 Mini. `WriteECReg` / `WriteReadECReg` value packing is still a hypothesis. `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.
