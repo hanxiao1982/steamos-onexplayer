@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * OneXPlayer G3E OxpWMI (SuRwECRegInterface).
+ * OneXPlayer OxpWMI (SuRwECRegInterface) — Intel / ecAccessType=2.
  *
  * Call pattern copied from msi-wmi-platform: wmi_driver + mutex around
  * wmidev_evaluate_method() + hwmon + debugfs. The ABI is not MSI's:
@@ -14,7 +14,7 @@
  *   Output byte[0] = 0x00 ok / 0xFF fail (opposite of msi-wmi-platform)
  *          byte[1] = EC RAM value
  *
- * For all OneXPlayer Intel Arc G3 Extreme handhelds that use OxpWMI.
+ * Transport for OneXPlayer Intel handhelds that speak OxpWMI.
  * Do not bind the MSI GUID. Not for AMD / WinRing0 boards.
  *
  * Copyright (C) 2026
@@ -36,7 +36,7 @@
 
 #define DRIVER_NAME		"oxp-wmi"
 
-/* Windows class SuRwECRegInterface, G3E guid qualifier */
+/* Windows class SuRwECRegInterface */
 #define OXP_WMI_GUID		"43B5A593-AD62-4257-8546-91B0797BEC1B"
 
 #define OXP_WMI_GROUP		0x04
@@ -47,7 +47,7 @@ enum oxp_wmi_method {
 	OXP_WMI_WRITE_READ_EC	= 3,
 };
 
-/* G3E EC map (OneXConsole intel_g3e / OxpWMI) */
+/* Default OxpWMI register set from the current OneXConsole Intel table */
 #define OXP_REG_PWM_ENABLE	0x4A
 #define OXP_REG_PWM_DUTY	0x4B
 #define OXP_REG_FAN_H		0x58
@@ -630,51 +630,41 @@ static struct wmi_driver oxp_wmi_driver = {
 	.no_singleton	= true,
 };
 
-/*
- * OneXConsole DMI Product names that force ecAccessType=2 (OxpWMI / G3E).
- */
-static const struct dmi_system_id oxp_wmi_dmi_table[] __initconst = {
+/* Vendor match: any OneXPlayer. AMD SKUs are denied below. */
+static const struct dmi_system_id oxp_wmi_vendor_dmi[] __initconst = {
 	{
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER X2Mini"),
 		},
 	},
-	{
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER X2"),
-		},
-	},
-	{
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER X2 EVA"),
-		},
-	},
-	{
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER 3"),
-		},
-	},
-	{
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER Apex Air"),
-		},
-	},
-	{
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER Apex i"),
-		},
-	},
-	/* Some images put the same string in Board Name (oxpec style). */
 	{
 		.matches = {
 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini"),
+		},
+	},
+	{ }
+};
+
+/* WinRing0 / AMD — OxpWMI is the Intel path. Exact names only (not Apex Air / i). */
+static const struct dmi_system_id oxp_wmi_amd_dmi[] __initconst = {
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER X2Mini PRO"),
+		},
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO"),
+		},
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONEXPLAYER APEX"),
+		},
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX"),
 		},
 	},
 	{ }
@@ -682,10 +672,14 @@ static const struct dmi_system_id oxp_wmi_dmi_table[] __initconst = {
 
 static int __init oxp_wmi_init(void)
 {
-	if (!dmi_check_system(oxp_wmi_dmi_table)) {
+	if (dmi_check_system(oxp_wmi_amd_dmi)) {
 		if (!force)
 			return -ENODEV;
-		pr_warn("Ignoring DMI whitelist\n");
+		pr_warn("AMD / WinRing0 SKU; loading because force=1\n");
+	} else if (!dmi_check_system(oxp_wmi_vendor_dmi)) {
+		if (!force)
+			return -ENODEV;
+		pr_warn("Ignoring DMI vendor check\n");
 	}
 
 	return wmi_driver_register(&oxp_wmi_driver);
@@ -700,6 +694,6 @@ module_init(oxp_wmi_init);
 module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
-MODULE_DESCRIPTION("OneXPlayer G3E OxpWMI EC access");
+MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);

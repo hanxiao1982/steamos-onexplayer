@@ -2,7 +2,7 @@
 
 Source: OneXConsole **0.10.2-fix8** only. **No live EC reads on this SKU yet.**
 
-X2 Mini PRO is the AMD (Strix Halo) SKU. It does **not** share the Intel G3E map: [x2-mini.md](x2-mini.md). Do not copy X2 Mini live values here. Do **not** load [`oxp-wmi`](oxp-wmi.md) (that module is OneXPlayer G3E / OxpWMI only).
+X2 Mini PRO is the AMD (Strix Halo) SKU. It does **not** share the Intel G3E map: [x2-mini.md](x2-mini.md). Do not copy X2 Mini live values here. Do **not** load [`oxp-wmi`](oxp-wmi.md) (that module is OneXPlayer Intel / OxpWMI only).
 
 ## Products on this map
 

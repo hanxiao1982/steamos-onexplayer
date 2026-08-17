@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 config OXP_WMI
-	tristate "OneXPlayer G3E OxpWMI EC"
+	tristate "OneXPlayer OxpWMI EC (Intel)"
 	depends on ACPI_WMI
 	depends on HWMON
 	depends on DMI
 	help
-	  WMI client for OneXPlayer Intel Arc G3 Extreme (G3E) handhelds
-	  that use SuRwECRegInterface (ecAccessType=2).
+	  WMI client for OneXPlayer Intel handhelds that use
+	  SuRwECRegInterface (ecAccessType=2 / OxpWMI).
 
 	  Talks to GUID 43B5A593-AD62-4257-8546-91B0797BEC1B the same way
 	  msi-wmi-platform talks to the MSI Claw GUID: wmidev_evaluate_method
