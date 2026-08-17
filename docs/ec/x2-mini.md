@@ -27,13 +27,13 @@ Every row is: app address table → live WMI on this machine. `encoded = 0x400 +
 
 | UI | CompatLayerCT | Reg | Encoded | OneXConsole | Live |
 |---|---|---|---|---|---|
-| 风扇自动 / 预设 1 / 预设 2 | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | 1098 | `0` auto, `1` manual | **Same.** JS `fanMode` 0/1/2; profiles 1 and 2 both write `1`. Profile id is not in EC. |
-| 风扇百分比 | `EC_ADDR_FAN_SPEED` | `0x4B` | 1099 | 0–184; UI % = `4B×100/184`; write `n×184/100` | **Same.** UI never shows raw `4B`. |
-| 风扇 RPM | `EC_ADDR_FAN_SPEED_H/L` | `0x58`/`0x59` | 1112/1113 | BE16 | **Matches UI RPM.** |
-| CPU 温度 | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | 1136 | °C | **Matches UI.** |
-| 充电上限 | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | 1187 | UI 50–100 step 5 | **Tracks slider.** |
-| 旁路供电 | `EC_ADDR_BYPASS_POWER` | `0xA4` | 1188 | HTTP 0/1/2 → EC **0 / 1 / 3** (`N=3`) | **Confirmed 0 / 1 / 3.** |
-| 供电模式（只读） | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | 1251 | oxp keys `1/2/3/4/5/8/9` | **Bitfield + firmware bit4.** See below. |
+| Fan auto / preset 1 / preset 2 | `EC_ADDR_FAN_AUTOMATE` | `0x4A` | 1098 | `0` auto, `1` manual | **Same.** JS `fanMode` 0/1/2; profiles 1 and 2 both write `1`. Profile id is not in EC. |
+| Fan percent | `EC_ADDR_FAN_SPEED` | `0x4B` | 1099 | 0–184; UI % = `4B×100/184`; write `n×184/100` | **Same.** UI never shows raw `4B`. |
+| Fan RPM | `EC_ADDR_FAN_SPEED_H/L` | `0x58`/`0x59` | 1112/1113 | BE16 | **Matches UI RPM.** |
+| CPU temperature | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | 1136 | °C | **Matches UI.** |
+| Charge limit | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | 1187 | UI 50–100 step 5 | **Tracks slider.** |
+| Charge bypass | `EC_ADDR_BYPASS_POWER` | `0xA4` | 1188 | HTTP 0/1/2 → EC **0 / 1 / 3** (`N=3`) | **Confirmed 0 / 1 / 3.** |
+| Power-supply mode (read-only) | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | 1251 | oxp keys `1/2/3/4/5/8/9` | **Bitfield + firmware bit4.** See below. |
 
 Fan probe: [fan.md](fan.md). Charge probe: [charge.md](charge.md). UI vs EC: [ui-vs-ec.md](ui-vs-ec.md).
 
@@ -41,7 +41,7 @@ Fan probe: [fan.md](fan.md). Charge probe: [charge.md](charge.md). UI vs EC: [ui
 
 | CompatLayerCT | Reg | OneXConsole intent | Live |
 |---|---|---|---|
-| `EC_ADDR_APP_FUN_EN` | `0xEB` | old turbo / app-fun (`oxpec` mask `0x40`) | always **66** (`0x42`). 睿频/频率 UI do not write it. `funcButtonMode` off. |
+| `EC_ADDR_APP_FUN_EN` | `0xEB` | old turbo / app-fun (`oxpec` mask `0x40`) | always **66** (`0x42`). Turbo/clock UI do not write it. `funcButtonMode` off. |
 | `EC_ADDR_HANDLE_POWER` | `0x2D` | handle on=`1` / off=`0` / restore=`-1` | always **0**. Plug/unplug does not change it (HID). |
 | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | TDP gate (`getOXPSetTdpAble`) | always **0**. TDP is MSR. |
 | `EC_ADDR_OXP_BOARD_SENSOR1/2` | `0x60`/`0x61` | board temps | ~30–32 °C, not useful. |
@@ -56,13 +56,13 @@ Cross-checked against `background.js` routes. None of these write the G3E EC map
 | UI | OneXConsole path | Notes |
 |---|---|---|
 | TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | `intelTdpSetType=4`. `0xED` stays 0. |
-| 睿频开关 | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Does not touch `0xEB`. |
-| CPU 频率上限 | `/powerplan/setCpuMaxClock/{MHz}` | Power plan. Off → `0`. |
-| GPU 频率 | — | X2 Mini does **not** enable `manualGpuClk` / `gpuClk`. |
+| CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Does not touch `0xEB`. |
+| CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Power plan. Off → `0`. |
+| GPU clock | — | X2 Mini does **not** enable `manualGpuClk` / `gpuClk`. |
 | RGB / LED | `/rgbPartition/setColor\|setOpen\|setPreset` | `rgbPartitionMode`, `CommonHid`. No `EC_ADDR_RGB`. |
-| 震动 / 陀螺仪 / 键位 | `/programhandle/…`, `/gyro/…`, `/motor/…` | HID. |
-| 亮度、刷新率、音量 | Windows | `screenRefreshRate=120` is a capability flag. |
-| 手柄在位 | HID `handledHID` / `programhandle` | not `0x2D`. |
+| Rumble / gyro / key mapping | `/programhandle/…`, `/gyro/…`, `/motor/…` | HID. |
+| Brightness, refresh rate, volume | Windows | `screenRefreshRate=120` is a capability flag. |
+| Handle present | HID `handledHID` / `programhandle` | not `0x2D`. |
 
 ## `0xE3` live vs oxp keys
 
@@ -101,4 +101,4 @@ WMI driver (Intel / OxpWMI): [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Use fa
 
 Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
 
-TDP = Intel MSR. RGB / rumble / gyro = HID. 睿频 / CPU 频率 = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).
+TDP = Intel MSR. RGB / rumble / gyro = HID. CPU turbo / clock = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).

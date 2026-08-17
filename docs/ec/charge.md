@@ -37,9 +37,9 @@ On X2 Mini / X2 Mini PRO / APEX, `N=3`.
 
 | UI | HTTP `{mode}` | EC byte written | Meaning |
 |---|---|---|---|
-| 正常供电 (switch off) | `0` | **0** | Charge normally |
-| 旁路 · 睡眠与关机无效 | `1` | **1** | Inhibit while awake (`oxpec` `INHIBIT_CHARGE_AWAKE`) |
-| 旁路 · 始终生效 | `2` | **3** (`0x01\|0x02`) | Inhibit always (`oxpec` `INHIBIT_CHARGE`) |
+| Normal charge (switch off) | `0` | **0** | Charge normally |
+| Bypass · inactive in sleep/shutdown | `1` | **1** | Inhibit while awake (`oxpec` `INHIBIT_CHARGE_AWAKE`) |
+| Bypass · always on | `2` | **3** (`0x01\|0x02`) | Inhibit always (`oxpec` `INHIBIT_CHARGE`) |
 
 Read the **EC byte** (0 / 1 / 3), not the HTTP index. `2` on the wire is the UI’s second sub-mode, not the value stored in RAM.
 

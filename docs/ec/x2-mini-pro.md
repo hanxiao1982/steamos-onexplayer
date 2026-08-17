@@ -40,10 +40,10 @@ These are the addresses and routes the app actually inits / calls. Values in RAM
 | UI | Path |
 |---|---|
 | TDP PL1/PL2 | `/ryzenadj/setCpuPl/{pl1}/{pl2}` |
-| GPU 频率 | `/ryzenadj/setGpuClock/{clk}` (AMD `gpuClk` on) |
+| GPU clock | `/ryzenadj/setGpuClock/{clk}` (AMD `gpuClk` on) |
 | Combined | `/ryzenadj/setCpuPlAndGpuClock/{pl}/{clock}` |
 | RGB / LED | `/rgbPartition/…` + `CommonHid` |
-| 震动 / 陀螺仪 / 键位 | HID |
+| Rumble / gyro / key mapping | HID |
 
 `presetDCInMaxTdp=80`. BIOS `onec1` enables cooling-system 120 W (`power_dcin_cooling_effect`). Whether DC-in shows as oxp keys `4`/`5` is untested.
 

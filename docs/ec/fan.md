@@ -15,9 +15,9 @@ OneXConsole `fanMode` (JS, not an EC byte):
 
 | `fanMode` | UI | `/fan/automate` | `0x4A` |
 |---|---|---|---|
-| `0` | 自动 | `true` | `0` |
-| `1` | 预设 1 (`qs_fan_presetting1`) | `false` | `1` |
-| `2` | 预设 2 (`qs_fan_presetting2`) | `false` | `1` |
+| `0` | Auto | `true` | `0` |
+| `1` | Preset 1 (`qs_fan_presetting1`) | `false` | `1` |
+| `2` | Preset 2 (`qs_fan_presetting2`) | `false` | `1` |
 
 Profiles 1 and 2 are both manual. The curve lives in the app DB; JS interpolates a **percent** (clamped 20–100), POSTs `/fan/setFanSpeed/{n}`, and CompatLayerCT writes `0x4B = n * 184 / 100`. EC does not store “profile 1 vs 2”.
 
