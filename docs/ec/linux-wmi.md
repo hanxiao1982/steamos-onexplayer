@@ -12,7 +12,7 @@ This page is a file map plus a protocol comparison. Register offsets for OneXPla
 |---|---|
 | `drivers/platform/wmi/core.c` | WMI bus. Older trees still have this as `drivers/platform/x86/wmi.c`. Discovers `PNP0C14` `_WDG` GUIDs and implements `wmidev_evaluate_method()`. |
 | `include/linux/wmi.h` | `struct wmi_driver`, `wmi_device_id`, evaluate/query APIs. |
-| `drivers/platform/x86/wmi-bmof.c` (or `drivers/platform/wmi/wmi-bmof.c`) | Exposes Binary MOF so userspace (`bmfdec`) can dump class/method names. This is how `SuRwECRegInterface` would be found on a G3E unit. |
+| `drivers/platform/x86/wmi-bmof.c` (or `drivers/platform/wmi/wmi-bmof.c`) | Exposes the **BMOF catalog** GUID `05901221-D566-11D1-B2F0-00A0C9062910`. Decode with `bmf2mof`, not `bmfdec`. |
 | `Documentation/wmi/acpi-interface.rst` | ACPI-WMI wire format (`WMxx` method id + instance + buffer). |
 | `Documentation/wmi/driver-development-guide.rst` | How to write a `wmi_driver`. Points at Intel WMI samples for the call pattern. |
 | `drivers/acpi/ec.c` | ACPI Embedded Controller (`ec_read` / `ec_write`, ports 0x66/0x62). Used by `oxpec` and by AML if a WMI method’s OperationRegion is `EmbeddedControl`. |
@@ -129,16 +129,109 @@ Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
 `hid-msi` / `hid-msi-claw` is the wrong template for fans and charge. OneXConsole already treats RGB/rumble/gyro as HID (`CommonHid`), same split as Claw.
 
-## How to get the missing OneXPlayer GUID
+## How to identify the EC-access GUID
 
-On a G3E unit (X2 Mini, X2, OneXPlayer 3, Apex Air, Apex i):
+`bmfdec` 输出乱码**不能**用来排除某个 GUID。多数 `/sys/bus/wmi/devices/<GUID>/` 根本不是 MOF：对它们跑解码器只会得到二进制垃圾。GUID 对不对，看 **类名 / 方法名 / AML 是否碰 EC**，不看解码器是否漂亮。
+
+判定顺序：Windows 类限定符 → 只解码 BMOF 那个 GUID → ACPI `_WDG` + `WMxx` → 只读试读风扇寄存器。
+
+### 0. 先分清两种 GUID
+
+| GUID | 是什么 | 能不能当 OxpWMI 绑定目标 |
+|---|---|---|
+| `05901221-D566-11D1-B2F0-00A0C9062910` | 固件里的 **Binary MOF 目录**（`wmi-bmof`） | **否**。只用来查表。 |
+| 带 `WMI_METHOD`（flag `0x02`）的其它 GUID | 真正可 `evaluate_method` 的对象 | **候选**。其中一个应是 `SuRwECRegInterface`。 |
+| flag `0x08` | 事件（热键等） | 否 |
+| 无 method 的 data block | `WQxx` 查询块 | 一般否 |
+
+`ls /sys/bus/wmi/devices/` 里，**只有** BMOF 那个设备的 `bmof` 属性是合法 Binary MOF。其它目录即使有个叫 `bmof` 的文件，也不是给 `bmfdec` 用的。
+
+内核文档的正确命令是 **`bmf2mof`**（[pali/bmfdec](https://github.com/pali/bmfdec)），不是 `bmfdec`：
 
 ```
-ls /sys/bus/wmi/devices/
-# for each GUID that has a bmof attribute:
-cat /sys/bus/wmi/devices/<GUID>/bmof | bmfdec
+# 可能带 [-0] 后缀
+./bmf2mof /sys/bus/wmi/devices/05901221-D566-11D1-B2F0-00A0C9062910/bmof
 ```
 
-Look for `SuRwECRegInterface`, `ReadECReg`, `WriteECReg`, `GroupOffset`. `acpidump` + `iasl -d` on the WMI `PNP0C14` device shows the same GUID in `_WDG` and which AML method implements it.
+`bmfdec` 只做 DS-01/LZ 解压，吐出来仍是 UTF-16 结构体，终端里就是乱码。`bmf2mof` 才生成可读 MOF。
+
+解压后仍不像文本时，先看文件头是不是 `FOMB`（BMOF 倒序）：
+
+```
+hexdump -C /sys/bus/wmi/devices/05901221-D566-11D1-B2F0-00A0C9062910/bmof | head
+strings -el /sys/bus/wmi/devices/05901221-D566-11D1-B2F0-00A0C9062910/bmof
+```
+
+`-el` 是 little-endian UTF-16。能直接搜到 `SuRwECRegInterface` / `ReadECReg` / `WriteECReg` / `GroupOffset` 就够了；类上面的 `guid("{...}")` 就是要绑的 GUID。
+
+### 1. Windows：用已经知道的类名（最稳）
+
+OneXConsole 已经给出类名，不必猜。管理员 PowerShell：
+
+```powershell
+Get-CimClass -Namespace root/wmi -ClassName SuRwECRegInterface |
+  Select-Object -ExpandProperty CimClassQualifiers
+
+Get-CimClass -Namespace root/wmi -ClassName SuRwECRegInterface |
+  Select-Object -ExpandProperty CimClassMethods
+```
+
+要找的是 qualifier **`guid`**（形如 `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`）。方法列表里应有 `ReadECReg` / `WriteECReg`，参数名 `GroupOffset` / `GroupOffsetValue`。
+
+类名不确定时：
+
+```powershell
+Get-CimClass -Namespace root/wmi -MethodName ReadECReg
+Get-CimClass -Namespace root/wmi | Where-Object { $_.CimClassName -match 'EC' }
+```
+
+`Get-CimInstance -Namespace root/wmi -ClassName SuRwECRegInterface` 的 `InstanceName` 只说明挂在哪个 `PNP0C14` 上，**不是** GUID。
+
+只读确认（风扇高字节，编码地址 `0x400+0x58 = 0x458`）：
+
+```powershell
+$o = Get-CimInstance -Namespace root/wmi -ClassName SuRwECRegInterface
+Invoke-CimMethod -InputObject $o -MethodName ReadECReg -Arguments @{ GroupOffset = 0x458 }
+```
+
+能回来且数值像转速，这个 `guid` 就是 EC 访问接口。先不要 `WriteECReg`。
+
+### 2. Linux：从 `_WDG` 找到 method GUID，再看对应 `WMxx`
+
+```
+acpidump -b
+iasl -d *.dat
+```
+
+每个 `PNP0C14` 的 `_WDG` 是 20 字节一条：
+
+| 偏移 | 内容 |
+|---|---|
+| 0–15 | GUID（Windows GUID 字节序，不是按 u8 顺序打印的） |
+| 16–17 | object id（两个 ASCII 字符，例如 `BA`） |
+| 18 | instance count |
+| 19 | flags：`0x02` = 有 WMI method |
+
+只保留 `flags & 0x02`。object id `XX` 对应同设备下的 ACPI 方法 **`WMXX`**（例如 id `BA` → `WMBA`）。
+
+反汇编每个 `WMxx`，**这才是“是不是 EC”的判据**：
+
+- 访问 `OperationRegion (…, EmbeddedControl, …)`，或调用 `ECRD` / `ECWR` / `\_SB.PCI0.LPCB.EC0.` 一类路径
+- 出现 `0x0400`、对参数做 `And 0xFF` / `ShiftRight 8`（group + offset，对应 `0x400+reg`）
+- 出现已知 G3E 偏移：`0x58` 风扇、`0x4A`/`0x4B` PWM、`0xEB` turbo、`0xA3`–`0xA5` 充电
+
+同时满足「method GUID」+「AML 碰 EC / 0x400」的那条，就是 OxpWMI。事件 GUID 和 BMOF GUID 直接丢掉。
+
+`lswmi`（若发行版有）会把 GUID、object id、flags、对应 ACPI 路径打成一张表，省得手拆 `_WDG`。
+
+### 3. 不要用这些当“找到了”
+
+- 对每个 sysfs 目录跑 `bmfdec` 出乱码 / 不出乱码
+- GUID 碰巧是 `ABBC0F6E-8EA1-11D1-00A0-C90629100000`（MSI / 微软示例）。OneXPlayer 要用类名或 AML 再确认，不能因为常见就当是 Claw 那套 `Get_Data`
+- `oxpec` 的 `ec_read` 能读通：那只说明 ACPI EC 也在，**不能**代替 WMI GUID。G3E 上 OneXConsole 仍走 WMI
+
+### 4. 绑到驱动上还缺什么
+
+GUID 只是 `wmi_device_id`。还要 MOF / Windows 方法限定符里的 **`WmiMethodId`**（`ReadECReg` / `WriteECReg` 各一个整数），以及入参是 16 位 `GroupOffset` 还是包在 buffer 里。这些在乱码的 `bmfdec` 输出里没有；用第 1 节的 `CimClassMethods` 或第 0 节 `bmf2mof` 后的 `[WmiMethodId(n)]`。
 
 Until that dump exists, Linux cannot bind a WMI client. `oxpec` can only work if that firmware also exposes a standard ACPI EC (then `ec_read` of the low 8 bits may still work, which is the first check in [access.md](access.md)).

@@ -109,7 +109,7 @@ Userspace on Linux (not used by `oxpec`):
 
 - `/sys/kernel/debug/ec/ec0/io` when `CONFIG_ACPI_EC_DEBUGFS` / `ec_sys` is enabled
 - Still 8-bit ACPI EC, not WMI
-- `/sys/bus/wmi/devices/*/bmof` (decode with `bmfdec`) to find the OneXPlayer GUID
+- Only `05901221-D566-11D1-B2F0-00A0C9062910/bmof` is Binary MOF (`bmf2mof`, not `bmfdec`). How to pick the EC GUID: [linux-wmi.md](linux-wmi.md#how-to-identify-the-ec-access-guid)
 
 ## Side-by-side
 
@@ -165,5 +165,5 @@ TDP watts stay out of the EC on both sides (MSR / `ryzenadj` vs `oxpec` which do
 ## Implications for SteamOS
 
 1. **AMD (X2 Mini PRO)** — `oxpec` + ACPI EC is the right shape. Add DMI if missing; switch charge to `0xE5`/`0xE6`/`0xE7`; optionally expose `0xE3` / `0x2D` / sensors.
-2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge `0xA3`–`0xA5`). If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID (dump bmof; do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
+2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge `0xA3`–`0xA5`). If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID from `SuRwECRegInterface`’s `guid` qualifier or from `_WDG`+`WMxx` AML (do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
 3. Do not use WinRing0-style port I/O from Linux userspace; use ACPI EC or WMI.
