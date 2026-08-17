@@ -32,7 +32,7 @@ shared: &shared
   board_sensor1: 0x60
   board_sensor2: 0x61
   cpu_temp: 0x70
-  battery_temp: 0xA0
+  battery_temp: 0xA0   # X2 Mini live: always 0 — ignore
   battery_charge_current: 0xA1
   set_tdp_able: 0xED
 

@@ -53,6 +53,8 @@ X2 Mini live: byte stays **`5`** while limit/bypass are changed. Treat as unused
 
 `initOXPSensorEc` still registers these as a 16-bit BE pair. X2 Mini live: both bytes stay **0** (BE16 = 0) under the same UI changes. Ignore for mapping work; battery current if needed should come from the OS fuel gauge, not this pair.
 
+`0xA0` (battery temp) is the same: live always **0**, ignore. Use the OS fuel-gauge temp if needed.
+
 ## Read-only checks
 
 Admin PowerShell. Intel G3E (OxpWMI) — X2 Mini and the other G3E SKUs:

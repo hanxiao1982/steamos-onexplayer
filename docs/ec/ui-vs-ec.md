@@ -20,7 +20,7 @@ These update the OSD / QC panel. Changing them in software is not a “setting�
 | 风扇 RPM | `0x58`/`0x59` | BE16, confirmed |
 | CPU 温度 | `0x70` | °C, confirmed |
 | 板温（若显示） | `0x60` / `0x61` | `getOXPSensorInfo`; not live-checked yet |
-| 电池温度（若显示） | `0xA0` | same |
+| 电池温度 | `0xA0` | **Ignore:** live always `0` |
 | 供电模式文案 | `0xE3` | **Status only.** JS `getPowerSupplyMode` → `adjustMaxTdpMap[mode]`. Labels: `1` 电池, `2` TypeC≥100W, `4`/`5` TypeC≥140W, `8` TypeC≤65W. `500`/`501` remapped to `1`. Not a toggle. |
 
 ## Adjustable in UI, EC-backed, not live-confirmed
@@ -54,6 +54,7 @@ Do not look for these in `ReadECReg`.
 |---|---|
 | `0xA5` | Force-charge min; live stuck at `5`, no UI |
 | `0xA1`/`0xA2` | Charge current; live BE16 always `0` |
+| `0xA0` | Battery temp; live always `0` |
 
 ## Remaining read-only probe
 
@@ -88,6 +89,5 @@ function Mode-E3([int]$v) {
     TurboAppFun_EB = (Read-OxpEc 0xEB).Value          # no X2 Mini UI; just a baseline
     BoardTemp_60   = (Read-OxpEc 0x60).Value
     BoardTemp_61   = (Read-OxpEc 0x61).Value
-    BattTemp_A0    = (Read-OxpEc 0xA0).Value
 }
 ```

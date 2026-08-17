@@ -157,7 +157,7 @@ Userspace on Linux (not used by `oxpec`):
 |---|---|
 | `0x60` / `0x61` | board sensors |
 | `0x70` | CPU temp (`useEcCpuTemp`) |
-| `0xA0` | battery temp |
+| `0xA0` | battery temp; **X2 Mini live: always 0, ignore** |
 | `0xA1` / `0xA2` | charge current (16-bit BE); **X2 Mini live: always 0, ignore** |
 | `0xA5` or `0xE7` | force-charge minimum; **X2 Mini live: stuck at 5, no UI, ignore** |
 | `0xE3` | power-supply mode |

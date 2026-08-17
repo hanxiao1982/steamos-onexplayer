@@ -37,7 +37,7 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 | Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | |
 | Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | |
 | CPU temp | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | **Live:** °C, matches UI |
-| Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | |
+| Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | **Ignore:** live always `0` |
 | Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | **Ignore:** live BE16 always `0` |
 
 `fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2`. Read-only WMI probe: [fan.md](fan.md).
