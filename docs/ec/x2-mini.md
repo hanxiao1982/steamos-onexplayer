@@ -29,16 +29,16 @@ All of these force `deviceCpu=Intel`, `ecAccessType=2` (OxpWMI), `useEcCpuTemp`,
 | PWM duty | `EC_ADDR_FAN_SPEED` | `0x4B` | **0–184** |
 | Turbo / app-fun | `EC_ADDR_APP_FUN_EN` | `0xEB` | Linux `oxpec` mask `0x40` |
 | Handle power | `EC_ADDR_HANDLE_POWER` | `0x2D` | on=`1`, off=`0` (restore unused, `-1`) |
-| Charge limit % | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | EC 0–100; UI **50–100 step 5** |
-| Charge bypass | `EC_ADDR_BYPASS_POWER` | `0xA4` | EC **0 / 1 / 3** (HTTP mode index 0 / 1 / 2) |
-| Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | `0xA5` | no UI; read to see if 0–100 or unused |
+| Charge limit % | `EC_ADDR_CHARGE_LIMIT` | `0xA3` | **Live:** UI 50–100 step 5 writes this byte |
+| Charge bypass | `EC_ADDR_BYPASS_POWER` | `0xA4` | **Live:** EC **0 / 1 / 3** (HTTP 0 / 1 / 2) |
+| Force-charge min | `EC_ADDR_FORCE_CHARGE_MIN` | `0xA5` | **Ignore:** live value stuck at `5`, no UI |
 | Power-supply mode | `EC_ADDR_POWER_SUPPLY_MODE` | `0xE3` | |
 | TDP-able gate | `EC_ADDR_OXP_SET_TDP_ABLE` | `0xED` | watts via Intel MSR |
 | Board sensor 1 | `EC_ADDR_OXP_BOARD_SENSOR1` | `0x60` | |
 | Board sensor 2 | `EC_ADDR_OXP_BOARD_SENSOR2` | `0x61` | |
 | CPU temp | `EC_ADDR_OXP_CPU_TEMP` | `0x70` | |
 | Battery temp | `EC_ADDR_OXP_BATTERY_TEMP` | `0xA0` | |
-| Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | 16-bit BE |
+| Charge current | `EC_ADDR_OXP_BATTERY_CHARGE_CURRENT_H/L` | `0xA1` / `0xA2` | **Ignore:** live BE16 always `0` |
 
 `fanMode` is `"common"`. Closest Linux `oxpec` profile: `oxp_x1` / `oxp_2`.
 
@@ -55,5 +55,7 @@ initHandleEc(0x2D, 1, 0, -1)          # JS: 1069, 1, 0, -1
 initOXPSensorEc(0x60, 0x61, 0x70, 0xA0, 0xA1, 0xA2)
 battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 ```
+
+Value ranges and a read-only WMI probe: [charge.md](charge.md).
 
 TDP PL1/PL2/PL4: Intel MSR (`/msr/setCpuPl`). RGB / gyro / rumble: HID.

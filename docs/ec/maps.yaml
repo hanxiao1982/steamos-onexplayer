@@ -47,7 +47,8 @@ platforms:
     pwm_max: 184
     charge_limit: 0xA3
     charge_bypass: 0xA4
-    force_charge_min: 0xA5
+    force_charge_min: 0xA5   # X2 Mini live: stuck at 5, no UI — ignore
+    charge_current_live: unused  # 0xA1/0xA2 BE16 always 0 on X2 Mini
     <<: *shared
     products:
       - {id: x2-mini, product: ONEXPLAYER X2Mini, marketing: X2 Mini, tdp: {max: 45, boost: 46, default: 25}}

@@ -158,8 +158,8 @@ Userspace on Linux (not used by `oxpec`):
 | `0x60` / `0x61` | board sensors |
 | `0x70` | CPU temp (`useEcCpuTemp`) |
 | `0xA0` | battery temp |
-| `0xA1` / `0xA2` | charge current (16-bit BE) |
-| `0xA5` or `0xE7` | force-charge minimum |
+| `0xA1` / `0xA2` | charge current (16-bit BE); **X2 Mini live: always 0, ignore** |
+| `0xA5` or `0xE7` | force-charge minimum; **X2 Mini live: stuck at 5, no UI, ignore** |
 | `0xE3` | power-supply mode |
 | `0x2D` | detachable-handle power |
 | `0xED` | “set TDP allowed” gate |
@@ -169,7 +169,7 @@ Userspace on Linux (not used by `oxpec`):
 | Feature | oxpec | OneXConsole |
 |---|---|---|
 | Fan / PWM / turbo | yes, per-board | yes, two maps |
-| Charge limit / inhibit | `0xA3` / `0xA4` on fly/X1/G1 | Intel G3E: `0xA3`–`0xA5`; **AMD map: `0xE5`–`0xE7`** |
+| Charge limit / inhibit | `0xA3` / `0xA4` on fly/X1/G1 | Intel G3E live: **`0xA3`/`0xA4` only** (`0xA5` unused); **AMD map: `0xE5`/`0xE6`** (`0xE7` untested) |
 | Turbo LED | X1 `0x57` | not used on G3E / Mini PRO in this build |
 | PWM scale | 0–184 (x1/2), 0–255 (fly), 0–100 (old mini) | 0–184 G3E, 0–255 AMD |
 
@@ -178,5 +178,5 @@ TDP watts stay out of the EC on both sides (MSR / `ryzenadj` vs `oxpec` which do
 ## Implications for SteamOS
 
 1. **AMD (X2 Mini PRO)** — `oxpec` + ACPI EC is the right shape. Add DMI if missing; switch charge to `0xE5`/`0xE6`/`0xE7`; optionally expose `0xE3` / `0x2D` / sensors.
-2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge `0xA3`–`0xA5`). If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID from `SuRwECRegInterface`’s `guid` qualifier or from `_WDG`+`WMxx` AML (do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
+2. **Intel G3E** — first confirm `/sys/kernel/debug/ec/ec0/io` or `ec_read` works. If it does, add DMI as an X1-like board (fan `0x58`, turbo `0xEB`, PWM 0–184, charge **`0xA3`/`0xA4`**). If ACPI EC is absent, add a WMI client modeled on `msi-wmi-platform`’s `wmidev_evaluate_method` loop, bound to the OneXPlayer GUID from `SuRwECRegInterface`’s `guid` qualifier or from `_WDG`+`WMxx` AML (do not reuse `ABBC0F6E` / `MSI_ACPI`). Methods stay `ReadECReg` / `WriteECReg` with `GroupOffset = 0x400 + reg`. See [linux-wmi.md](linux-wmi.md).
 3. Do not use WinRing0-style port I/O from Linux userspace; use ACPI EC or WMI.
