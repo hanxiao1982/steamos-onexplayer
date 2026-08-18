@@ -118,6 +118,15 @@ static int in_len_param;
 module_param_named(in_len, in_len_param, int, 0444);
 MODULE_PARM_DESC(in_len, "WMI input buffer bytes: 0=auto, 4, 8, or 32");
 
+/*
+ * Windows CIM passes UInt32 as ACPI Integer. Linux wmidev types Arg2 from
+ * _WDG (often Buffer/String). 0x4B readback-then-clear on X2 Mini may be
+ * the Buffer shadow; Integer is the Windows write path.
+ */
+static bool arg2_int_param;
+module_param_named(arg2_int, arg2_int_param, bool, 0444);
+MODULE_PARM_DESC(arg2_int, "Pass WMAC Arg2 as Integer (needs WMxx; Windows CIM)");
+
 struct oxp_wmi_data {
 	struct wmi_device *wdev;
 	struct mutex wmi_lock;	/* firmware WMxx is not thread-safe */
@@ -125,11 +134,13 @@ struct oxp_wmi_data {
 	size_t in_len;
 	acpi_handle acpi_handle;
 	char wm_method[5];
+	bool arg2_int;
 	int wpack;
 	bool wpack_locked;
 	u8 last_out[OXP_WMI_OUT_LEN];
 	u8 last_acpi_type;
 	u32 last_acpi_len;
+	bool last_arg2_int;
 	char last_desc[160];
 };
 
@@ -159,15 +170,39 @@ static u32 oxp_wmi_write_method(int mode)
 
 static acpi_handle oxp_wmi_acpi_handle(struct wmi_device *wdev)
 {
-	struct device *parent = wdev->dev.parent;
+	struct device *dev;
 	struct acpi_device *adev;
+	int hop;
 
-	if (!parent)
-		return NULL;
-	if (ACPI_HANDLE(parent))
-		return ACPI_HANDLE(parent);
-	adev = ACPI_COMPANION(parent);
-	return adev ? adev->handle : NULL;
+	for (dev = &wdev->dev, hop = 0; dev && hop < 6; dev = dev->parent, hop++) {
+		if (ACPI_HANDLE(dev))
+			return ACPI_HANDLE(dev);
+		adev = ACPI_COMPANION(dev);
+		if (adev && adev->handle)
+			return adev->handle;
+	}
+	return NULL;
+}
+
+static int oxp_wmi_bind_wm(struct oxp_wmi_data *data, acpi_handle handle,
+			   const char *method)
+{
+	acpi_handle tmp;
+
+	if (!handle || !method || !method[0] || !method[1] || !method[2] ||
+	    !method[3] || method[4])
+		return -EINVAL;
+	if (ACPI_FAILURE(acpi_get_handle(handle, (char *)method, &tmp)))
+		return -ENOENT;
+	data->acpi_handle = handle;
+	data->wm_method[0] = method[0];
+	data->wm_method[1] = method[1];
+	data->wm_method[2] = method[2];
+	data->wm_method[3] = method[3];
+	data->wm_method[4] = '\0';
+	dev_info(&data->wdev->dev, "WMI method %s (Arg2 Buffer or Integer)\n",
+		 data->wm_method);
+	return 0;
 }
 
 static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
@@ -176,40 +211,46 @@ static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
 	const struct oxp_wdg_block *blocks;
 	union acpi_object *obj;
 	acpi_handle handle;
+	char wm[5];
 	u32 i, n;
 	int ret = -ENODEV;
 
 	handle = oxp_wmi_acpi_handle(data->wdev);
 	if (!handle)
 		return -ENODEV;
-	if (ACPI_FAILURE(acpi_evaluate_object(handle, "_WDG", NULL, &out)))
-		return -ENXIO;
 
-	obj = out.pointer;
-	if (!obj || obj->type != ACPI_TYPE_BUFFER || !obj->buffer.pointer) {
+	if (!ACPI_FAILURE(acpi_evaluate_object(handle, "_WDG", NULL, &out))) {
+		obj = out.pointer;
+		if (obj && obj->type == ACPI_TYPE_BUFFER && obj->buffer.pointer) {
+			blocks = (const struct oxp_wdg_block *)obj->buffer.pointer;
+			n = obj->buffer.length / sizeof(*blocks);
+			for (i = 0; i < n; i++) {
+				if (memcmp(blocks[i].guid, oxp_wmi_guid_bin, 16))
+					continue;
+				/* Do not require METHOD flag; X2 Mini live
+				 * often showed wm=(wmidev) when we skipped
+				 * the GUID because flags != 0x02.
+				 */
+				wm[0] = 'W';
+				wm[1] = 'M';
+				wm[2] = blocks[i].object_id[0];
+				wm[3] = blocks[i].object_id[1];
+				wm[4] = '\0';
+				dev_info(&data->wdev->dev,
+					 "GUID object_id=%c%c flags=0x%02x\n",
+					 wm[2], wm[3], blocks[i].flags);
+				if (!oxp_wmi_bind_wm(data, handle, wm)) {
+					ret = 0;
+					break;
+				}
+			}
+		}
 		kfree(obj);
-		return -ENXIO;
 	}
 
-	blocks = (const struct oxp_wdg_block *)obj->buffer.pointer;
-	n = obj->buffer.length / sizeof(*blocks);
-	for (i = 0; i < n; i++) {
-		if (memcmp(blocks[i].guid, oxp_wmi_guid_bin, 16))
-			continue;
-		if (!(blocks[i].flags & OXP_WDG_METHOD))
-			continue;
-		data->acpi_handle = handle;
-		data->wm_method[0] = 'W';
-		data->wm_method[1] = 'M';
-		data->wm_method[2] = blocks[i].object_id[0];
-		data->wm_method[3] = blocks[i].object_id[1];
-		data->wm_method[4] = '\0';
-		dev_info(&data->wdev->dev, "WMI method %s (forced Buffer Arg2)\n",
-			 data->wm_method);
+	/* Known object_id on this GUID (sysfs: …/object_id = AC). */
+	if (ret && !oxp_wmi_bind_wm(data, handle, "WMAC"))
 		ret = 0;
-		break;
-	}
-	kfree(obj);
 	return ret;
 }
 
@@ -425,7 +466,7 @@ static int oxp_wmi_parse_output(union acpi_object *obj, u8 *out)
  * Status polarity is inverted vs MSI: 0x00 is success here.
  */
 static int oxp_wmi_query_len(struct oxp_wmi_data *data, u32 method, u32 in_val,
-			     u8 *out, size_t input_length)
+			     u8 *out, size_t input_length, bool arg2_int)
 {
 	u8 input[OXP_WMI_IN_LEN] = { 0 };
 	struct acpi_buffer acpi_out = { ACPI_ALLOCATE_BUFFER, NULL };
@@ -444,10 +485,10 @@ static int oxp_wmi_query_len(struct oxp_wmi_data *data, u32 method, u32 in_val,
 	memcpy(input, &packed, sizeof(packed));
 
 	mutex_lock(&data->wmi_lock);
+	data->last_arg2_int = false;
 	/*
-	 * Prefer WMxx + ACPI Buffer. wmidev_evaluate_method() types Arg2 as
-	 * String when _WDG has the STRING flag; ToInteger(String) is 0, so
-	 * WriteECReg can return status 0x00 without changing the EC.
+	 * Prefer WMxx so Arg2 type is ours. wmidev_evaluate_method() types
+	 * Arg2 from _WDG (Buffer or String). Windows CIM uses Integer.
 	 */
 	if (data->acpi_handle && data->wm_method[0]) {
 		union acpi_object params[3];
@@ -460,11 +501,20 @@ static int oxp_wmi_query_len(struct oxp_wmi_data *data, u32 method, u32 in_val,
 		params[0].integer.value = 0;
 		params[1].type = ACPI_TYPE_INTEGER;
 		params[1].integer.value = method;
-		params[2].type = ACPI_TYPE_BUFFER;
-		params[2].buffer.length = input_length;
-		params[2].buffer.pointer = input;
+		if (arg2_int) {
+			params[2].type = ACPI_TYPE_INTEGER;
+			params[2].integer.value = in_val;
+			data->last_arg2_int = true;
+		} else {
+			params[2].type = ACPI_TYPE_BUFFER;
+			params[2].buffer.length = input_length;
+			params[2].buffer.pointer = input;
+		}
 		status = acpi_evaluate_object(data->acpi_handle, data->wm_method,
 					      &arglist, &acpi_out);
+	} else if (arg2_int) {
+		mutex_unlock(&data->wmi_lock);
+		return -EOPNOTSUPP;
 	} else {
 		status = wmidev_evaluate_method(data->wdev, 0x0, method,
 						&acpi_in, &acpi_out);
@@ -504,7 +554,8 @@ static int oxp_wmi_query_len(struct oxp_wmi_data *data, u32 method, u32 in_val,
 static int oxp_wmi_query(struct oxp_wmi_data *data, u32 method, u32 in_val,
 			 u8 *out)
 {
-	return oxp_wmi_query_len(data, method, in_val, out, data->in_len);
+	return oxp_wmi_query_len(data, method, in_val, out, data->in_len,
+				 data->arg2_int);
 }
 
 static int oxp_wmi_read_len(struct oxp_wmi_data *data, u8 reg, u8 *value,
@@ -514,7 +565,8 @@ static int oxp_wmi_read_len(struct oxp_wmi_data *data, u8 reg, u8 *value,
 	int ret;
 
 	ret = oxp_wmi_query_len(data, OXP_WMI_READ_EC,
-				oxp_wmi_pack_read(reg), out, input_length);
+				oxp_wmi_pack_read(reg), out, input_length,
+				data->arg2_int);
 	if (ret)
 		return ret;
 
@@ -1016,7 +1068,8 @@ static bool oxp_eval_looks_hex(const char *s, size_t n)
 
 		if (!c)
 			break;
-		if (isspace(c) || c == ',' || c == 'x' || c == 'X')
+		if (isspace(c) || c == ',' || c == 'x' || c == 'X' ||
+		    c == 'i' || c == 'I')
 			continue;
 		if (isxdigit(c)) {
 			any = true;
@@ -1045,14 +1098,32 @@ static ssize_t oxp_dbg_eval_write(struct file *file, const char __user *ubuf,
 		return -EFAULT;
 
 	if (oxp_eval_looks_hex(raw, n)) {
-		if (oxp_eval_from_hex(raw, n, buf))
+		size_t i = 0;
+		bool want_int = data->arg2_int;
+
+		while (i < n && isspace(raw[i]))
+			i++;
+		if (i < n && (raw[i] == 'i' || raw[i] == 'I') &&
+		    (i + 1 >= n || isspace(raw[i + 1]) || raw[i + 1] == ',')) {
+			want_int = true;
+			i++;
+			while (i < n && (isspace(raw[i]) || raw[i] == ','))
+				i++;
+		}
+		if (oxp_eval_from_hex(raw + i, n - i, buf))
 			return -EINVAL;
-	} else {
-		if (n < 4)
+		if (buf[0] < 1 || buf[0] > 3)
 			return -EINVAL;
-		memcpy(buf, raw, min_t(size_t, n, sizeof(buf)));
+		in_val = buf[1] | ((u32)buf[2] << 8) | ((u32)buf[3] << 16) |
+			 ((u32)buf[4] << 24);
+		ret = oxp_wmi_query_len(data, buf[0], in_val, out, data->in_len,
+					want_int);
+		return ret ? ret : (ssize_t)len;
 	}
 
+	if (n < 4)
+		return -EINVAL;
+	memcpy(buf, raw, min_t(size_t, n, sizeof(buf)));
 	if (buf[0] < 1 || buf[0] > 3)
 		return -EINVAL;
 	in_val = buf[1] | ((u32)buf[2] << 8) | ((u32)buf[3] << 16) |
@@ -1078,10 +1149,11 @@ static ssize_t oxp_dbg_last_info_read(struct file *file, char __user *ubuf,
 	int n;
 
 	n = scnprintf(buf, sizeof(buf),
-		      "wm=%s in_len=%zu wpack=%s acpi_type=%u acpi_len=%u\n"
+		      "wm=%s arg2=%s in_len=%zu wpack=%s acpi_type=%u acpi_len=%u\n"
 		      "out=%02x %02x %02x %02x %02x %02x %02x %02x\n"
 		      "%s\n",
 		      data->wm_method[0] ? data->wm_method : "(wmidev)",
+		      data->last_arg2_int ? "integer" : "buffer",
 		      data->in_len,
 		      data->wpack_locked ? oxp_wpack_names[data->wpack] :
 					    "(unset)",
@@ -1168,6 +1240,7 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 
 	data->wdev = wdev;
 	data->in_len = OXP_WMI_IN_LEN;
+	data->arg2_int = arg2_int_param;
 	mutex_init(&data->wmi_lock);
 	dev_set_drvdata(&wdev->dev, data);
 
@@ -1192,8 +1265,11 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 		if (!force)
 			return ret;
 	} else {
-		dev_info(&wdev->dev, "OxpWMI ok, CPU temp %u C (in_len=%zu)\n",
-			 temp, data->in_len);
+		dev_info(&wdev->dev,
+			 "OxpWMI ok, CPU temp %u C (in_len=%zu arg2=%s wm=%s)\n",
+			 temp, data->in_len,
+			 data->arg2_int ? "integer" : "buffer",
+			 data->wm_method[0] ? data->wm_method : "(wmidev)");
 	}
 
 	oxp_wmi_debugfs_init(data);
@@ -1283,6 +1359,6 @@ module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
 MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
-MODULE_VERSION("0.5");
+MODULE_VERSION("0.6");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);

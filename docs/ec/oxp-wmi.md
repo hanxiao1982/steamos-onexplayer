@@ -78,7 +78,26 @@ sudo kmod/scripts/hwmon-pwm.sh --read
 sudo kmod/scripts/hwmon-pwm.sh --hold 8 80
 ```
 
-X2 Mini live: `WriteECReg` packing works (`pwm1_enable` stays 1; `pwm1` readback is 203 after an 80% write). Stopping `steamos-manager` / PowerStation does **not** change that. Within ~1s `0x4B` reads back 0, and `fan1_input` stays 360 even in the instant when `pwm1` is 203. Firmware is either sampling/clearing duty on a 1 Hz loop, or `0x4B` is a mailbox that does not drive the motor until something else applies it. Next check: `hwmon-pwm.sh --burst --hold 8 100` (rewrite every 50ms, no mid-hold pwm reads).
+X2 Mini live (Bazzite, oxp-wmi **0.4**, `wm=(wmidev)`, `poke-oxp-wmi.sh`):
+
+| Call | Immediate | +300ms / +1s |
+|---|---|---|
+| method 2 `0x4A=1` | `pwm1_enable=1`; return STRING all `0x00` | `0x4A` **stays 1** |
+| method 3 `0x4B=184` | return `0x00,0xB8,…`; `pwm1=255` | `pwm1=0`; **RPM still 429** |
+| method 2 `0x4A=0` | `pwm1_enable=2` | auto restored |
+
+So `04,reg,val,00` is the correct UInt32 layout. Method 2 does not echo; method 3 echoes the written byte in `uStringReturn[1]` (not a multi-register dump). `0x4B` is a mailbox: readback works, firmware clears it, motor never moves. `--burst` (rewrite every 50ms) also left RPM unchanged.
+
+`wm=(wmidev)` means 0.4 never bound `WMAC`. Windows CIM passes `GroupOffsetValue` as ACPI **Integer**; Linux `wmidev` types Arg2 from `_WDG` (Buffer/String). 0.6 walks the ACPI parent, binds `WMAC` even without the `_WDG` METHOD flag, and can send Integer Arg2 (`insmod oxp-wmi.ko arg2_int=1`, or `echo i 3 04 4b b8 00 > eval`).
+
+Next on-device check (script-only, works on 0.4):
+
+```
+sudo kmod/scripts/poke-oxp-wmi.sh          # bank scan 0x40-0x5F around a 0x4B write
+sudo kmod/scripts/poke-oxp-wmi.sh --watch  # 0x4B + RPM every 20ms
+```
+
+Paste the `== diff ==` blocks. A second register changing with `0x4B` is the latch. If only `0x4B` flips then clears, try 0.6 Integer/`WMAC` before writing more duty.
 
 If `pwm1_enable` stays `2`, the write itself did not stick. The driver tries method 2/3 and a few UInt32 layouts; `dmesg` prints which packing read back.
 
@@ -98,9 +117,11 @@ printf '\x4a\x01' | sudo tee /sys/kernel/debug/oxp-wmi-*/write_ec >/dev/null
 
 # raw WMAC poke (method + 4-byte LE). 0.5+ accepts hex text:
 #   echo 2 04 4a 01 00 | sudo tee .../eval
+# 0.6+ Integer Arg2 (Windows CIM): echo i 3 04 4b b8 00
 # Do not use `printf '%s'` for a 5-byte payload that ends in NUL.
-sudo kmod/scripts/poke-oxp-wmi.sh
-sudo kmod/scripts/poke-oxp-wmi.sh 2 0x04 0x4b 0xff 0x00
+sudo kmod/scripts/poke-oxp-wmi.sh            # --scan
+sudo kmod/scripts/poke-oxp-wmi.sh --watch
+sudo kmod/scripts/poke-oxp-wmi.sh 2 0x04 0x4b 0xb8 0x00
 ```
 
 Status byte `0x00` = ok, `0xFF` = fail (inverted vs `msi-wmi-platform`).

@@ -308,4 +308,4 @@ The object that is both a method GUID and AML that hits the EC / `0x400` is OxpW
 
 The GUID is only `wmi_device_id`. You also need **`WmiMethodId`** from MOF / Windows method qualifiers (`ReadECReg` / `WriteECReg` each have an integer), and whether the input is a 16-bit `GroupOffset` or a buffer. Garbled `bmfdec` output does not have that; use `CimClassMethods` in section 1 or `[WmiMethodId(n)]` after `bmf2mof` in section 0.
 
-GUID, method IDs (1/2/3), `GroupOffset` packing, and `uStringReturn` layout are known on X2 Mini. `WriteECReg` / `WriteReadECReg` value packing is still a hypothesis. `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.
+GUID, method IDs (1/2/3), `GroupOffset` packing, and `uStringReturn` layout are known on X2 Mini. Write packing `04,reg,val,00` is live-confirmed (`0x4A` sticks; method 3 echoes `0x4B`). The remaining gap is apply: `0x4B` is cleared in ~200ms and RPM never changes on Linux Buffer/`wmidev` writes. `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.

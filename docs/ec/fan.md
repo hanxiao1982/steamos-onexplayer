@@ -21,6 +21,8 @@ OneXConsole `fanMode` (JS, not an EC byte):
 
 Profiles 1 and 2 are both manual. The curve lives in the app DB; JS interpolates a **percent** (clamped 20–100), POSTs `/fan/setFanSpeed/{n}`, and CompatLayerCT writes `0x4B = n * 184 / 100`. EC does not store “profile 1 vs 2”.
 
+Linux WMI writes on X2 Mini: `0x4A` sticks (auto/manual). `0x4B` readbacks then returns to 0 within ~200ms and **RPM does not move**. On Windows the same `0x4B` matches the UI percent, so the register is real — the Linux Arg2 type / apply path is still wrong. Scan neighbors with `kmod/scripts/poke-oxp-wmi.sh` before assuming a different duty register.
+
 `0x4B` is the PWM compare register (same scale Linux `oxpec` uses on X1-class boards). Convert only when talking to the UI:
 
 ```
