@@ -12,6 +12,7 @@ kmod/scripts/collect-dmi.sh --add
 # Intel G3E / X2 Mini
 kmod/scripts/apply-all.sh                # build oxp-wmi.ko
 sudo kmod/scripts/test-oxp-wmi.sh
+sudo kmod/scripts/hwmon-pwm.sh 40        # name=oxp_wmi, not oxpec
 sudo kmod/scripts/install-oxp-wmi.sh
 
 # AMD / oxpec
