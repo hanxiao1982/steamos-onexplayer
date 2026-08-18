@@ -95,6 +95,12 @@ sudo hexdump -C /sys/kernel/debug/oxp-wmi-*/read_ec | head
 
 # write reg 0x4A = 1 (manual)
 printf '\x4a\x01' | sudo tee /sys/kernel/debug/oxp-wmi-*/write_ec >/dev/null
+
+# raw WMAC poke (method + 4-byte LE). 0.5+ accepts hex text:
+#   echo 2 04 4a 01 00 | sudo tee .../eval
+# Do not use `printf '%s'` for a 5-byte payload that ends in NUL.
+sudo kmod/scripts/poke-oxp-wmi.sh
+sudo kmod/scripts/poke-oxp-wmi.sh 2 0x04 0x4b 0xff 0x00
 ```
 
 Status byte `0x00` = ok, `0xFF` = fail (inverted vs `msi-wmi-platform`).

@@ -33,6 +33,7 @@
 #include <linux/debugfs.h>
 #include <linux/dmi.h>
 #include <linux/hwmon.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -972,25 +973,92 @@ static ssize_t oxp_dbg_write_ec_write(struct file *file, const char __user *ubuf
 	return ret ? ret : 2;
 }
 
+/*
+ * eval accepts either:
+ *   hex text:  "2 04 4a 01 00\n"   (shell-safe; missing bytes default 0)
+ *   raw bytes: method + 4-byte LE payload (4 bytes ok; last is padded)
+ *
+ * Do not require a trailing NUL in the raw form: bash `printf '%s'`
+ * stops at \\0 and used to return EINVAL from the old len<5 check.
+ */
+static int oxp_eval_from_hex(const char *s, size_t n, u8 out[5])
+{
+	char tmp[80];
+	char *p, *tok;
+	unsigned int v;
+	int i = 0;
+
+	if (n >= sizeof(tmp))
+		n = sizeof(tmp) - 1;
+	memcpy(tmp, s, n);
+	tmp[n] = '\0';
+
+	p = tmp;
+	while ((tok = strsep(&p, " \t\r\n,")) != NULL) {
+		if (!tok[0])
+			continue;
+		if (i >= 5)
+			return -EINVAL;
+		if (kstrtouint(tok, 16, &v) || v > 255)
+			return -EINVAL;
+		out[i++] = (u8)v;
+	}
+	return i ? 0 : -EINVAL;
+}
+
+static bool oxp_eval_looks_hex(const char *s, size_t n)
+{
+	size_t i;
+	bool any = false;
+
+	for (i = 0; i < n; i++) {
+		unsigned char c = s[i];
+
+		if (!c)
+			break;
+		if (isspace(c) || c == ',' || c == 'x' || c == 'X')
+			continue;
+		if (isxdigit(c)) {
+			any = true;
+			continue;
+		}
+		return false;
+	}
+	return any;
+}
+
 static ssize_t oxp_dbg_eval_write(struct file *file, const char __user *ubuf,
 				  size_t len, loff_t *off)
 {
 	struct oxp_wmi_data *data = file->private_data;
-	u8 buf[5];
+	char raw[80];
+	u8 buf[5] = { 0 };
 	u8 out[OXP_WMI_OUT_LEN];
 	u32 in_val;
+	size_t n;
 	int ret;
 
-	if (*off || len < 5)
+	if (*off || !len)
 		return -EINVAL;
-	if (copy_from_user(buf, ubuf, 5))
+	n = min_t(size_t, len, sizeof(raw));
+	if (copy_from_user(raw, ubuf, n))
 		return -EFAULT;
+
+	if (oxp_eval_looks_hex(raw, n)) {
+		if (oxp_eval_from_hex(raw, n, buf))
+			return -EINVAL;
+	} else {
+		if (n < 4)
+			return -EINVAL;
+		memcpy(buf, raw, min_t(size_t, n, sizeof(buf)));
+	}
+
 	if (buf[0] < 1 || buf[0] > 3)
 		return -EINVAL;
 	in_val = buf[1] | ((u32)buf[2] << 8) | ((u32)buf[3] << 16) |
 		 ((u32)buf[4] << 24);
 	ret = oxp_wmi_query(data, buf[0], in_val, out);
-	return ret ? ret : 5;
+	return ret ? ret : (ssize_t)len;
 }
 
 static ssize_t oxp_dbg_last_out_read(struct file *file, char __user *ubuf,
@@ -1215,6 +1283,6 @@ module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
 MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
-MODULE_VERSION("0.4");
+MODULE_VERSION("0.5");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);
