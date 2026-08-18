@@ -32,7 +32,9 @@
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
 #include <linux/dmi.h>
+#include <linux/guid.h>
 #include <linux/hwmon.h>
+#include <linux/uuid.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -75,6 +77,30 @@ enum oxp_wmi_method {
 #define OXP_BYPASS_AWAKE	1
 #define OXP_BYPASS_ALWAYS	3
 
+#define OXP_WDG_METHOD		0x02
+
+enum oxp_wmi_wpack {
+	OXP_WPACK_GRV = 0,	/* 04, reg, val, 00  + WriteECReg */
+	OXP_WPACK_GRV_M3,	/* same bytes + WriteReadECReg */
+	OXP_WPACK_GR0V,		/* 04, reg, 00, val */
+	OXP_WPACK_RGV,		/* reg, 04, val, 00  (JS UInt32 order) */
+	OXP_WPACK_COUNT,
+};
+
+static const char * const oxp_wpack_names[OXP_WPACK_COUNT] = {
+	"04,reg,val,00 method2",
+	"04,reg,val,00 method3",
+	"04,reg,00,val method2",
+	"reg,04,val,00 method2",
+};
+
+struct oxp_wdg_block {
+	guid_t guid;
+	u8 object_id[2];
+	u8 instance_count;
+	u8 flags;
+} __packed;
+
 static bool force;
 module_param_unsafe(force, bool, 0444);
 MODULE_PARM_DESC(force, "Load without DMI whitelist (debug)");
@@ -92,6 +118,10 @@ struct oxp_wmi_data {
 	struct mutex wmi_lock;	/* firmware WMxx is not thread-safe */
 	struct dentry *debugfs;
 	size_t in_len;
+	acpi_handle acpi_handle;
+	char wm_method[5];
+	int wpack;
+	bool wpack_locked;
 	u8 last_out[OXP_WMI_OUT_LEN];
 	u8 last_acpi_type;
 	u32 last_acpi_len;
@@ -103,9 +133,82 @@ static u32 oxp_wmi_pack_read(u8 reg)
 	return OXP_WMI_GROUP | ((u32)reg << 8);
 }
 
-static u32 oxp_wmi_pack_write(u8 reg, u8 value)
+static u32 oxp_wmi_pack_write_mode(u8 reg, u8 value, int mode)
 {
-	return OXP_WMI_GROUP | ((u32)reg << 8) | ((u32)value << 16);
+	switch (mode) {
+	case OXP_WPACK_GR0V:
+		return OXP_WMI_GROUP | ((u32)reg << 8) | ((u32)value << 24);
+	case OXP_WPACK_RGV:
+		return (u32)reg | ((u32)OXP_WMI_GROUP << 8) | ((u32)value << 16);
+	default:
+		return OXP_WMI_GROUP | ((u32)reg << 8) | ((u32)value << 16);
+	}
+}
+
+static u32 oxp_wmi_write_method(int mode)
+{
+	if (mode == OXP_WPACK_GRV_M3)
+		return OXP_WMI_WRITE_READ_EC;
+	return OXP_WMI_WRITE_EC;
+}
+
+static acpi_handle oxp_wmi_acpi_handle(struct wmi_device *wdev)
+{
+	struct device *parent = wdev->dev.parent;
+	struct acpi_device *adev;
+
+	if (!parent)
+		return NULL;
+	if (ACPI_HANDLE(parent))
+		return ACPI_HANDLE(parent);
+	adev = ACPI_COMPANION(parent);
+	return adev ? adev->handle : NULL;
+}
+
+static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
+{
+	struct acpi_buffer out = { ACPI_ALLOCATE_BUFFER, NULL };
+	const struct oxp_wdg_block *blocks;
+	union acpi_object *obj;
+	acpi_handle handle;
+	guid_t want;
+	u32 i, n;
+	int ret = -ENODEV;
+
+	handle = oxp_wmi_acpi_handle(data->wdev);
+	if (!handle)
+		return -ENODEV;
+	if (guid_parse(OXP_WMI_GUID, &want))
+		return -EINVAL;
+	if (ACPI_FAILURE(acpi_evaluate_object(handle, "_WDG", NULL, &out)))
+		return -ENXIO;
+
+	obj = out.pointer;
+	if (!obj || obj->type != ACPI_TYPE_BUFFER || !obj->buffer.pointer) {
+		kfree(obj);
+		return -ENXIO;
+	}
+
+	blocks = (const struct oxp_wdg_block *)obj->buffer.pointer;
+	n = obj->buffer.length / sizeof(*blocks);
+	for (i = 0; i < n; i++) {
+		if (!guid_equal(&blocks[i].guid, &want))
+			continue;
+		if (!(blocks[i].flags & OXP_WDG_METHOD))
+			continue;
+		data->acpi_handle = handle;
+		data->wm_method[0] = 'W';
+		data->wm_method[1] = 'M';
+		data->wm_method[2] = blocks[i].object_id[0];
+		data->wm_method[3] = blocks[i].object_id[1];
+		data->wm_method[4] = '\0';
+		dev_info(&data->wdev->dev, "WMI method %s (forced Buffer Arg2)\n",
+			 data->wm_method);
+		ret = 0;
+		break;
+	}
+	kfree(obj);
+	return ret;
 }
 
 static bool oxp_looks_like_hex_text(const u8 *p, u32 n)
@@ -339,8 +442,31 @@ static int oxp_wmi_query_len(struct oxp_wmi_data *data, u32 method, u32 in_val,
 	memcpy(input, &packed, sizeof(packed));
 
 	mutex_lock(&data->wmi_lock);
-	status = wmidev_evaluate_method(data->wdev, 0x0, method, &acpi_in,
-					&acpi_out);
+	/*
+	 * Prefer WMxx + ACPI Buffer. wmidev_evaluate_method() types Arg2 as
+	 * String when _WDG has the STRING flag; ToInteger(String) is 0, so
+	 * WriteECReg can return status 0x00 without changing the EC.
+	 */
+	if (data->acpi_handle && data->wm_method[0]) {
+		union acpi_object params[3];
+		struct acpi_object_list arglist = {
+			.count = 3,
+			.pointer = params,
+		};
+
+		params[0].type = ACPI_TYPE_INTEGER;
+		params[0].integer.value = 0;
+		params[1].type = ACPI_TYPE_INTEGER;
+		params[1].integer.value = method;
+		params[2].type = ACPI_TYPE_BUFFER;
+		params[2].buffer.length = input_length;
+		params[2].buffer.pointer = input;
+		status = acpi_evaluate_object(data->acpi_handle, data->wm_method,
+					      &arglist, &acpi_out);
+	} else {
+		status = wmidev_evaluate_method(data->wdev, 0x0, method,
+						&acpi_in, &acpi_out);
+	}
 	mutex_unlock(&data->wmi_lock);
 
 	if (ACPI_FAILURE(status))
@@ -399,12 +525,65 @@ static int oxp_wmi_read(struct oxp_wmi_data *data, u8 reg, u8 *value)
 	return oxp_wmi_read_len(data, reg, value, data->in_len);
 }
 
-static int oxp_wmi_write(struct oxp_wmi_data *data, u8 reg, u8 value)
+static int oxp_wmi_write_raw(struct oxp_wmi_data *data, u8 reg, u8 value,
+			     int mode)
 {
 	u8 out[OXP_WMI_OUT_LEN];
 
-	return oxp_wmi_query(data, OXP_WMI_WRITE_EC,
-			     oxp_wmi_pack_write(reg, value), out);
+	return oxp_wmi_query(data, oxp_wmi_write_method(mode),
+			     oxp_wmi_pack_write_mode(reg, value, mode), out);
+}
+
+static int oxp_wmi_write(struct oxp_wmi_data *data, u8 reg, u8 value)
+{
+	u8 got;
+	int mode, ret, last = -EIO;
+
+	if (data->wpack_locked) {
+		ret = oxp_wmi_write_raw(data, reg, value, data->wpack);
+		if (ret)
+			return ret;
+		ret = oxp_wmi_read(data, reg, &got);
+		if (ret)
+			return ret;
+		if (got != value) {
+			dev_err(&data->wdev->dev,
+				"WriteECReg readback mismatch reg 0x%02x want %u got %u (%s)\n",
+				reg, value, got, data->last_desc);
+			return -EIO;
+		}
+		return 0;
+	}
+
+	for (mode = 0; mode < OXP_WPACK_COUNT; mode++) {
+		ret = oxp_wmi_write_raw(data, reg, value, mode);
+		if (ret) {
+			last = ret;
+			continue;
+		}
+		ret = oxp_wmi_read(data, reg, &got);
+		if (ret) {
+			last = ret;
+			continue;
+		}
+		if (got == value) {
+			data->wpack = mode;
+			data->wpack_locked = true;
+			dev_info(&data->wdev->dev,
+				 "WriteECReg packing %s (reg 0x%02x=%u)\n",
+				 oxp_wpack_names[mode], reg, value);
+			return 0;
+		}
+		dev_info(&data->wdev->dev,
+			 "WriteECReg %s: readback reg 0x%02x want %u got %u\n",
+			 oxp_wpack_names[mode], reg, value, got);
+		last = -EIO;
+	}
+
+	dev_err(&data->wdev->dev,
+		"WriteECReg did not stick (reg 0x%02x=%u). Check last_info.\n",
+		reg, value);
+	return last;
 }
 
 static int oxp_wmi_read_be16(struct oxp_wmi_data *data, u8 hi_reg, u16 *val)
@@ -795,10 +974,14 @@ static ssize_t oxp_dbg_last_info_read(struct file *file, char __user *ubuf,
 	int n;
 
 	n = scnprintf(buf, sizeof(buf),
-		      "in_len=%zu acpi_type=%u acpi_len=%u\n"
+		      "wm=%s in_len=%zu wpack=%s acpi_type=%u acpi_len=%u\n"
 		      "out=%02x %02x %02x %02x %02x %02x %02x %02x\n"
 		      "%s\n",
-		      data->in_len, data->last_acpi_type, data->last_acpi_len,
+		      data->wm_method[0] ? data->wm_method : "(wmidev)",
+		      data->in_len,
+		      data->wpack_locked ? oxp_wpack_names[data->wpack] :
+					    "(unset)",
+		      data->last_acpi_type, data->last_acpi_len,
 		      data->last_out[0], data->last_out[1],
 		      data->last_out[2], data->last_out[3],
 		      data->last_out[4], data->last_out[5],
@@ -874,6 +1057,10 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 	data->in_len = OXP_WMI_IN_LEN;
 	mutex_init(&data->wmi_lock);
 	dev_set_drvdata(&wdev->dev, data);
+
+	if (oxp_wmi_discover_wm(data))
+		dev_warn(&wdev->dev,
+			 "no WMxx; writes use wmidev Arg2 typing\n");
 
 	ret = oxp_wmi_probe_in_len(data);
 	if (ret) {
@@ -983,6 +1170,6 @@ module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
 MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
-MODULE_VERSION("0.2");
+MODULE_VERSION("0.3");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);

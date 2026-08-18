@@ -31,7 +31,7 @@ parms="$(modinfo -F parm "${KO}" 2>/dev/null || true)"
 echo "ko version = ${ver:-"(none)"}"
 if ! grep -q '^in_len:' <<<"${parms}"; then
   echo >&2
-  echo "This .ko is older than the 32-byte buffer patch (no in_len parm, version != 0.2)." >&2
+  echo "This .ko is older than the 32-byte buffer patch (no in_len parm)." >&2
   echo "You are still testing the original driver. Rebuild after updating the tree:" >&2
   echo "  git fetch origin && git checkout cursor/oxp-kernel-module-research-0b45 && git pull" >&2
   echo "  kmod/scripts/build.sh oxp-wmi" >&2

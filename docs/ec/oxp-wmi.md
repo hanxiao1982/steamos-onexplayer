@@ -71,13 +71,14 @@ In auto (`pwm1_enable=2`) `pwm1` may read 0 while the fan still spins; duty `0x4
 
 If `temp1_input` is `0` but `dmesg` says `OxpWMI ok` with no `in_len=`, you are still on the old `.ko`. Probe tries **32, then 8, then 4**. Override with `insmod oxp-wmi.ko in_len=32`.
 
-Manual fan 40%:
+Manual fan 40% (rebuild 0.2+ first; writes now read back `0x4A`/`0x4B`):
 
 ```
-H=$(ls -d /sys/class/hwmon/hwmon* | while read d; do grep -q oxp_wmi $d/name && echo $d; done)
-echo 1 > $H/pwm1_enable
-echo 102 > $H/pwm1          # 102/255 ≈ 40% → EC ≈ 74/184
+sudo kmod/scripts/hwmon-pwm.sh --read
+sudo kmod/scripts/hwmon-pwm.sh --hold 8 40
 ```
+
+If `pwm1_enable` stays `2`, `WriteECReg` did not stick (WMI status 0 with no EC change). The driver tries method 2/3 and a few UInt32 layouts; `dmesg` prints which packing read back. A 3-second auto restore can also hide a real RPM change — use `--hold`.
 
 ## Write packing (still a hypothesis)
 

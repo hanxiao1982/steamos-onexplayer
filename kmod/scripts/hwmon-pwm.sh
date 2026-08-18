@@ -3,16 +3,20 @@
 # Empty HWMON + echo > "$HWMON/pwm1" writes /pwm1 on the ostree root (EIO: read-only).
 set -euo pipefail
 
-PERCENT="${1:-40}"
+PERCENT=40
+HOLD=5
 
 usage() {
   cat <<'EOF'
 Usage:
-  hwmon-pwm.sh [percent]     Set manual PWM (~percent), wait 3s, restore auto
-  hwmon-pwm.sh --find        Print the hwmon directory and exit
-  hwmon-pwm.sh --read        Print fan/pwm/temp and exit
+  hwmon-pwm.sh [percent]        Set manual PWM, wait, restore auto
+  hwmon-pwm.sh --hold SEC 40    Keep manual for SEC seconds (default 5)
+  hwmon-pwm.sh --find           Print the hwmon directory and exit
+  hwmon-pwm.sh --read           Print fan/pwm/temp and exit
 
 Looks for name=oxp_wmi first (X2 Mini / Intel G3E), then name=oxpec (AMD).
+On X2 Mini a write that does not stick (pwm1_enable stays 2) means WriteECReg
+packing is still wrong; the script treats that as failure.
 EOF
 }
 
@@ -31,9 +35,41 @@ find_hwmon() {
   return 1
 }
 
+dump() {
+  local label="$1"
+  echo "== ${label} =="
+  for attr in fan1_input pwm1 pwm1_enable temp1_input; do
+    if [[ -e "$HWMON/$attr" ]]; then
+      echo "  $attr=$(cat "$HWMON/$attr")"
+    fi
+  done
+}
+
 if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
   usage
   exit 0
+fi
+
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --hold)
+      HOLD="${2:?--hold needs seconds}"
+      shift 2
+      ;;
+    --find|--read|-h|--help)
+      args+=("$1")
+      shift
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${args[@]+"${args[@]}"}"
+if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+  PERCENT="$1"
 fi
 
 HWMON="$(find_hwmon || true)"
@@ -58,11 +94,7 @@ if [[ "${1:-}" == --find ]]; then
 fi
 
 if [[ "${1:-}" == --read ]]; then
-  for attr in fan1_input pwm1 pwm1_enable temp1_input; do
-    if [[ -e "$HWMON/$attr" ]]; then
-      echo "  $attr=$(cat "$HWMON/$attr")"
-    fi
-  done
+  dump read
   exit 0
 fi
 
@@ -76,15 +108,40 @@ if ! [[ "$PERCENT" =~ ^[0-9]+$ ]] || [[ "$PERCENT" -lt 1 || "$PERCENT" -gt 100 ]
   exit 2
 fi
 
+if ! [[ "$HOLD" =~ ^[0-9]+$ ]] || [[ "$HOLD" -lt 1 ]]; then
+  echo "hold seconds must be >= 1" >&2
+  exit 2
+fi
+
 # hwmon pwm1 is 0-255. oxp-wmi maps that onto EC 0-184 internally.
 PWM=$((PERCENT * 255 / 100))
-echo "manual ${PERCENT}% -> pwm1=${PWM}"
+echo "manual ${PERCENT}% -> pwm1=${PWM} (hold ${HOLD}s)"
 
-echo 1 > "$HWMON/pwm1_enable"
-echo "$PWM" > "$HWMON/pwm1"
-sleep 3
-if [[ -e "$HWMON/fan1_input" ]]; then
-  echo "fan1_input=$(cat "$HWMON/fan1_input")"
+dump before
+
+if ! echo 1 > "$HWMON/pwm1_enable"; then
+  echo "pwm1_enable=1 write failed (WriteECReg packing or WMI type)." >&2
+  echo "dmesg | grep oxp-wmi | tail; cat /sys/kernel/debug/oxp-wmi-*/last_info" >&2
+  exit 3
 fi
+en="$(cat "$HWMON/pwm1_enable")"
+echo "after enable write: pwm1_enable=${en}"
+if [[ "$en" != 1 ]]; then
+  echo "pwm1_enable did not stick (still ${en}). Fan stayed in auto; duty writes are ignored." >&2
+  echo "dmesg | grep oxp-wmi | tail; cat /sys/kernel/debug/oxp-wmi-*/last_info" >&2
+  exit 3
+fi
+
+if ! echo "$PWM" > "$HWMON/pwm1"; then
+  echo "pwm1=${PWM} write failed" >&2
+  echo 2 > "$HWMON/pwm1_enable" || true
+  exit 3
+fi
+dump after-write
+
+sleep "$HOLD"
+dump after-hold
+
 echo 2 > "$HWMON/pwm1_enable"
 echo "restored pwm1_enable=2 (auto)"
+dump after-restore
