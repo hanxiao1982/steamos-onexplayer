@@ -32,9 +32,7 @@
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
 #include <linux/dmi.h>
-#include <linux/guid.h>
 #include <linux/hwmon.h>
-#include <linux/uuid.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -94,8 +92,14 @@ static const char * const oxp_wpack_names[OXP_WPACK_COUNT] = {
 	"reg,04,val,00 method2",
 };
 
+/* 43B5A593-AD62-4257-8546-91B0797BEC1B in Windows/_WDG mixed-endian order. */
+static const u8 oxp_wmi_guid_bin[16] = {
+	0x93, 0xa5, 0xb5, 0x43, 0x62, 0xad, 0x57, 0x42,
+	0x85, 0x46, 0x91, 0xb0, 0x79, 0x7b, 0xec, 0x1b
+};
+
 struct oxp_wdg_block {
-	guid_t guid;
+	u8 guid[16];
 	u8 object_id[2];
 	u8 instance_count;
 	u8 flags;
@@ -171,15 +175,12 @@ static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
 	const struct oxp_wdg_block *blocks;
 	union acpi_object *obj;
 	acpi_handle handle;
-	guid_t want;
 	u32 i, n;
 	int ret = -ENODEV;
 
 	handle = oxp_wmi_acpi_handle(data->wdev);
 	if (!handle)
 		return -ENODEV;
-	if (guid_parse(OXP_WMI_GUID, &want))
-		return -EINVAL;
 	if (ACPI_FAILURE(acpi_evaluate_object(handle, "_WDG", NULL, &out)))
 		return -ENXIO;
 
@@ -192,7 +193,7 @@ static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
 	blocks = (const struct oxp_wdg_block *)obj->buffer.pointer;
 	n = obj->buffer.length / sizeof(*blocks);
 	for (i = 0; i < n; i++) {
-		if (!guid_equal(&blocks[i].guid, &want))
+		if (memcmp(blocks[i].guid, oxp_wmi_guid_bin, 16))
 			continue;
 		if (!(blocks[i].flags & OXP_WDG_METHOD))
 			continue;
