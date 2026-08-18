@@ -9,9 +9,9 @@ config OXP_WMI
 	  WMI client for OneXPlayer Intel handhelds that use
 	  SuRwECRegInterface (ecAccessType=2 / OxpWMI).
 
-	  Talks to GUID 43B5A593-AD62-4257-8546-91B0797BEC1B the same way
-	  msi-wmi-platform talks to the MSI Claw GUID: wmidev_evaluate_method
-	  plus a driver mutex. Exposes fan/PWM/CPU temp via hwmon and
+	  Talks to GUID 43B5A593-AD62-4257-8546-91B0797BEC1B. Calls the
+	  firmware WMxx method with Arg2 as an ACPI Integer (Windows
+	  UInt32 GroupOffset). Exposes fan/PWM/CPU temp via hwmon and
 	  charge limit / bypass via sysfs.
 
 	  Do not enable this on AMD / WinRing0 boards (oxpec).

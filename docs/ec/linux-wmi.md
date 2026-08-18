@@ -172,8 +172,8 @@ Do not write until that is confirmed. Method 3 may fill more of the 8-byte retur
 Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
 1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
-2. `wmidev_evaluate_method(wdev, 0, method_id, in, out)` with a driver mutex. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
-3. Input is a 4-byte little-endian `UInt32`: read `04, reg, 0, 0`; write likely `04, reg, value, 0`. Parse output byte[0] as status, byte[1] as the register. Do **not** pass JS `0x400+reg` as the UInt32.
+2. Resolve `WMxx` from `_WDG` and call `acpi_evaluate_object` with Arg2 as an **ACPI Integer** (`GroupOffset` / `GroupOffsetValue`). `wmidev_evaluate_method()` always types Arg2 as Buffer (or String if `_WDG` has the STRING flag). On X2 Mini that path can succeed with every EC byte `0`. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
+3. Integer value is the little-endian `UInt32`: read `0x04 | (reg << 8)`; write likely `0x04 | (reg << 8) | (value << 16)`. Parse output byte[0] as status, byte[1] as the register. Also accept comma-hex `uStringReturn` and a Package `{ ReturnValue, string }` / eight integers. Do **not** pass JS `0x400+reg` as the UInt32.
 4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, PWM 0–184, charge `0xA3`/`0xA4`). Skip `0xEB` / `0xA5` on X2 Mini (live unused).
 5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
 

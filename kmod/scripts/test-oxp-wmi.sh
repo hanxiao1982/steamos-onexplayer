@@ -33,7 +33,14 @@ shopt -u nullglob
 if [[ ${#wmi_devs[@]} -eq 0 ]]; then
   echo "no ${GUID} under /sys/bus/wmi/devices (not an OxpWMI firmware, or WMI not up)"
 else
-  printf '%s\n' "${wmi_devs[@]}"
+  for d in "${wmi_devs[@]}"; do
+    echo "${d}"
+    for f in object_id instance_count guid; do
+      if [[ -e "${d}/${f}" ]]; then
+        printf '  %-15s %s\n' "${f}" "$(tr -d '\n' <"${d}/${f}")"
+      fi
+    done
+  done
 fi
 
 echo
@@ -54,6 +61,9 @@ extra=()
 if [[ "${OXP_WMI_FORCE:-0}" == 1 ]]; then
   extra+=(force=1)
 fi
+if [[ -n "${OXP_WMI_ARG2:-}" ]]; then
+  extra+=("arg2=${OXP_WMI_ARG2}")
+fi
 if ! insmod "${KO}" "${extra[@]+"${extra[@]}"}"; then
   echo "insmod failed. Common causes:" >&2
   echo "  - vermagic mismatch (rebuild against THIS kernel's headers)" >&2
@@ -72,6 +82,7 @@ dmesg | grep -iE 'oxp-wmi|oxp_wmi' | tail -n 20 || true
 echo
 echo "== hwmon =="
 found=0
+zeros=0
 for hw in /sys/class/hwmon/hwmon*; do
   name="$(cat "${hw}/name" 2>/dev/null || true)"
   if [[ "${name}" == oxp_wmi ]]; then
@@ -79,7 +90,11 @@ for hw in /sys/class/hwmon/hwmon*; do
     echo "found ${hw} (name=${name})"
     for attr in fan1_input pwm1 pwm1_enable temp1_input; do
       if [[ -e "${hw}/${attr}" ]]; then
-        echo "  ${attr}=$(cat "${hw}/${attr}")"
+        val="$(cat "${hw}/${attr}")"
+        echo "  ${attr}=${val}"
+        if [[ "${attr}" == temp1_input && "${val}" == 0 ]]; then
+          zeros=1
+        fi
       fi
     done
   fi
@@ -87,6 +102,25 @@ done
 if [[ "${found}" -eq 0 ]]; then
   echo "oxp-wmi loaded but no hwmon. Probe failed; check dmesg / WMI GUID" >&2
   exit 1
+fi
+
+echo
+echo "== debugfs last_info =="
+shopt -s nullglob
+infos=(/sys/kernel/debug/oxp-wmi-*/last_info)
+shopt -u nullglob
+if [[ ${#infos[@]} -eq 0 ]]; then
+  echo "(no /sys/kernel/debug/oxp-wmi-*/last_info — is debugfs mounted?)"
+else
+  cat "${infos[0]}"
+fi
+
+if [[ "${zeros}" -eq 1 ]]; then
+  echo
+  echo "WARNING: temp1_input is 0. On a warm X2 Mini that means Arg2/parse is still wrong." >&2
+  echo "Check dmesg for 'ReadECReg integer' vs 'ReadECReg buffer' and last_info above." >&2
+  echo "Override: sudo insmod ${KO} arg2=1   # force ACPI Integer GroupOffset" >&2
+  exit 2
 fi
 
 echo

@@ -78,6 +78,8 @@ sudo kmod/scripts/install-inputplumber.sh
 
 `install-cachyos.sh` / `install-bazzite.sh` / `ssh-handheld.sh … all` take this path automatically. Source is `linux/oxp-wmi/`; no `fetch-oxpec.sh`. See [ec/oxp-wmi.md](ec/oxp-wmi.md).
 
+If `test-oxp-wmi.sh` loads the module but `temp1_input=0` / `dmesg` says `CPU temp 0 C`, rebuild this tree. The WMI method is succeeding; Arg2 must be an ACPI Integer (Windows `GroupOffset` UInt32), not a 4-byte Buffer. `dmesg` should show `using ACPI Integer Arg2` and a non-zero temp. Override: `insmod oxp-wmi.ko arg2=1`.
+
 ---
 
 ## 2. Fetch the source and apply the same edit

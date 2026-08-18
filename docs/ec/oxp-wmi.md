@@ -52,6 +52,9 @@ DMI: `Manufacturer` or `Board Vendor` contains `ONE-NETBOOK`. Known AMD products
 
 ```
 dmesg | grep oxp-wmi
+# WMI method WMxx flags=0x..
+# ReadECReg integer: ret=0 CPU NN C (...)
+# using ACPI Integer Arg2 (Windows UInt32 GroupOffset)
 # OxpWMI ok, CPU temp NN C
 
 ls /sys/class/hwmon/hwmon*/name
@@ -59,7 +62,12 @@ cat /sys/class/hwmon/oxp_wmi/fan1_input
 cat /sys/class/hwmon/oxp_wmi/temp1_input
 cat /sys/bus/wmi/devices/43B5A593-AD62-4257-8546-91B0797BEC1B*/charge_behaviour
 cat /sys/bus/wmi/devices/43B5A593-AD62-4257-8546-91B0797BEC1B*/power_supply_mode
+sudo cat /sys/kernel/debug/oxp-wmi-*/last_info
 ```
+
+If `temp1_input` is `0` but `dmesg` says `OxpWMI ok`, the WMI call is succeeding and returning empty data. Windows CIM sends `GroupOffset` as a **UInt32 / ACPI Integer**. `wmidev_evaluate_method()` always passes Arg2 as a Buffer (or a String if the `_WDG` STRING flag is set). Firmware that does `And` / `ShiftRight` on an Integer then reads register 0 and returns status `0x00` + value `0`.
+
+The driver now finds `WMxx` from `_WDG` and tries Integer vs Buffer at probe. Override with `insmod oxp-wmi.ko arg2=1` (Integer) or `arg2=0` (Buffer).
 
 Manual fan 40%:
 
