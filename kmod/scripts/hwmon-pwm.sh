@@ -5,12 +5,14 @@ set -euo pipefail
 
 PERCENT=40
 HOLD=5
+REFRESH=0
 
 usage() {
   cat <<'EOF'
 Usage:
   hwmon-pwm.sh [percent]        Set manual PWM, wait, restore auto
   hwmon-pwm.sh --hold SEC 40    Keep manual for SEC seconds (default 5)
+  hwmon-pwm.sh --refresh        Rewrite pwm1 every second during hold
   hwmon-pwm.sh --find           Print the hwmon directory and exit
   hwmon-pwm.sh --read           Print fan/pwm/temp and exit
 
@@ -56,6 +58,10 @@ while [[ $# -gt 0 ]]; do
     --hold)
       HOLD="${2:?--hold needs seconds}"
       shift 2
+      ;;
+    --refresh)
+      REFRESH=1
+      shift
       ;;
     --find|--read|-h|--help)
       args+=("$1")
@@ -138,9 +144,29 @@ if ! echo "$PWM" > "$HWMON/pwm1"; then
   exit 3
 fi
 dump after-write
+if [[ "$REFRESH" -eq 1 ]]; then
+  echo "rewriting pwm1=${PWM} every second (fights firmware/userspace clearing 0x4B)"
+fi
 
-sleep "$HOLD"
+i=1
+while [[ "$i" -le "$HOLD" ]]; do
+  sleep 1
+  fan="$(cat "$HWMON/fan1_input" 2>/dev/null || echo ?)"
+  pwm="$(cat "$HWMON/pwm1" 2>/dev/null || echo ?)"
+  en="$(cat "$HWMON/pwm1_enable" 2>/dev/null || echo ?)"
+  echo "  t=${i}s fan=${fan} pwm1=${pwm} enable=${en}"
+  if [[ "$REFRESH" -eq 1 ]]; then
+    echo "$PWM" > "$HWMON/pwm1" || echo "  rewrite pwm1 failed" >&2
+  fi
+  i=$((i + 1))
+done
 dump after-hold
+
+if [[ "$(cat "$HWMON/pwm1")" == 0 && "$(cat "$HWMON/pwm1_enable")" == 1 ]]; then
+  echo "note: pwm1 dropped to 0 while still manual. Firmware or a userspace" >&2
+  echo "fan daemon (steamos-manager / PowerStation) likely cleared 0x4B." >&2
+  echo "Retry: sudo systemctl stop steamos-manager.service; sudo $0 --refresh --hold 8 80" >&2
+fi
 
 echo 2 > "$HWMON/pwm1_enable"
 echo "restored pwm1_enable=2 (auto)"

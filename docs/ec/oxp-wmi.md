@@ -75,10 +75,12 @@ Manual fan 40% (rebuild 0.2+ first; writes now read back `0x4A`/`0x4B`):
 
 ```
 sudo kmod/scripts/hwmon-pwm.sh --read
-sudo kmod/scripts/hwmon-pwm.sh --hold 8 40
+sudo kmod/scripts/hwmon-pwm.sh --hold 8 80
 ```
 
-If `pwm1_enable` stays `2`, `WriteECReg` did not stick (WMI status 0 with no EC change). The driver tries method 2/3 and a few UInt32 layouts; `dmesg` prints which packing read back. A 3-second auto restore can also hide a real RPM change — use `--hold`.
+X2 Mini live: `pwm1_enable=1` and `pwm1≈101` read back immediately after a 40% write, so `WriteECReg` packing works. The fan RPM stayed 360 and `pwm1` fell back to 0 within 8s while still manual — something else is clearing `0x4B` (firmware or Bazzite `steamos-manager` / PowerStation). Retry after `systemctl stop steamos-manager.service`, or `hwmon-pwm.sh --refresh --hold 8 80`.
+
+If `pwm1_enable` stays `2`, the write itself did not stick. The driver tries method 2/3 and a few UInt32 layouts; `dmesg` prints which packing read back.
 
 ## Write packing (still a hypothesis)
 
