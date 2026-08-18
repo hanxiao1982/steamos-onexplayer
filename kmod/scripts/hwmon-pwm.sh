@@ -15,7 +15,8 @@ Usage:
   hwmon-pwm.sh [percent]        Set manual PWM, wait, restore auto
   hwmon-pwm.sh --hold SEC 40    Keep manual for SEC seconds (default 5)
   hwmon-pwm.sh --refresh        Rewrite pwm1 every second during hold
-  hwmon-pwm.sh --burst          Rewrite pwm1 every 50ms; do not read pwm during hold
+  hwmon-pwm.sh --burst 8 100    8s hold at 100%; rewrite pwm1 every 50ms
+                                (two numbers after flags = hold, percent)
   hwmon-pwm.sh --duty-first     Write pwm1 before pwm1_enable
   hwmon-pwm.sh --find           Print the hwmon directory and exit
   hwmon-pwm.sh --read           Print fan/pwm/temp and exit
@@ -86,7 +87,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 set -- "${args[@]+"${args[@]}"}"
-if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+# One number: percent. Two numbers: hold seconds, then percent.
+# So `--burst 8 100` is 8s at 100%, not 8% for the default 5s hold.
+if [[ "${1:-}" =~ ^[0-9]+$ && "${2:-}" =~ ^[0-9]+$ ]]; then
+  HOLD="$1"
+  PERCENT="$2"
+elif [[ "${1:-}" =~ ^[0-9]+$ ]]; then
   PERCENT="$1"
 fi
 
@@ -133,7 +139,7 @@ fi
 
 # hwmon pwm1 is 0-255. oxp-wmi maps that onto EC 0-184 internally.
 PWM=$((PERCENT * 255 / 100))
-echo "manual ${PERCENT}% -> pwm1=${PWM} (hold ${HOLD}s)"
+echo "manual ${PERCENT}% -> pwm1=${PWM} (hold ${HOLD}s burst=${BURST} refresh=${REFRESH})"
 
 dump before
 
