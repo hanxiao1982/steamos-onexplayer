@@ -15,4 +15,5 @@ Two platforms, two maps:
 - [docs/ec/linux-wmi.md](docs/ec/linux-wmi.md) — kernel WMI / MSI Claw G3E vs OxpWMI
 - [docs/ec/oxp-wmi.md](docs/ec/oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer Intel / OxpWMI)
 - [linux/oxp-wmi/](linux/oxp-wmi/) — out-of-tree driver (modeled on `msi-wmi-platform`)
+- X2 Mini deploy uses `kmod/scripts` (`ec-stack.sh` → `build.sh oxp-wmi` → `install-oxp-wmi.sh`); see [docs/local-build-and-deploy.md](docs/local-build-and-deploy.md)
 - [docs/ec/maps.yaml](docs/ec/maps.yaml) — machine-readable tables

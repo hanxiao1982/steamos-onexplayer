@@ -14,8 +14,8 @@ Usage (on your PC, not on the handheld):
   ssh-handheld.sh user@host collect [--add [slug]] [--force]
   ssh-handheld.sh user@host pull-devices
   ssh-handheld.sh user@host install
-  ssh-handheld.sh user@host check            # SSH 后检查编译/采集环境（可先于 push）
-  ssh-handheld.sh user@host status           # 同 check
+  ssh-handheld.sh user@host check            # env probe after SSH (works before push)
+  ssh-handheld.sh user@host status           # alias for check
   ssh-handheld.sh user@host all              # push + check + collect --add + install + pull-devices
   ssh-handheld.sh user@host run -- <cmd>     # remote shell in the copied repo
 
@@ -82,6 +82,12 @@ push_repo() {
     --exclude 'kmod/oxpec/*.mod.c'
     --exclude 'kmod/oxpec/Module.symvers'
     --exclude 'kmod/oxpec/modules.order'
+    --exclude 'linux/oxp-wmi/*.ko'
+    --exclude 'linux/oxp-wmi/*.o'
+    --exclude 'linux/oxp-wmi/*.mod'
+    --exclude 'linux/oxp-wmi/*.mod.c'
+    --exclude 'linux/oxp-wmi/Module.symvers'
+    --exclude 'linux/oxp-wmi/modules.order'
   )
   if [[ "${OXP_PUSH_SOURCE:-0}" != 1 ]]; then
     excludes+=(--exclude 'kmod/oxpec/oxpec.c')
@@ -99,6 +105,10 @@ push_repo() {
       --exclude='kmod/oxpec/*.o'
       --exclude='kmod/oxpec/*.mod'
       --exclude='kmod/oxpec/*.mod.c'
+      --exclude='linux/oxp-wmi/*.ko'
+      --exclude='linux/oxp-wmi/*.o'
+      --exclude='linux/oxp-wmi/*.mod'
+      --exclude='linux/oxp-wmi/*.mod.c'
     )
     if [[ "${OXP_PUSH_SOURCE:-0}" != 1 ]]; then
       tar_ex+=(--exclude='kmod/oxpec/oxpec.c')

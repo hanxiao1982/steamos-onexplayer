@@ -32,7 +32,7 @@ fi
 
 if mokutil --sb-state 2>/dev/null | grep -qi 'SecureBoot enabled'; then
   cat >&2 <<EOF
-Secure Boot is enabled. An unsigned oxpec.ko will be rejected.
+Secure Boot is enabled. An unsigned local .ko will be rejected.
 Disable Secure Boot in firmware for local testing, or sign the
 module with a MOK and enroll it (ujust enroll-secure-boot-key
 only enrolls Universal Blue's key, not yours).
@@ -40,11 +40,21 @@ EOF
   exit 1
 fi
 
+STACK="$("${ROOT}/kmod/scripts/ec-stack.sh" detect)"
+echo "ec-stack=${STACK}"
+
+if [[ "$STACK" == oxp-wmi ]]; then
+  "${ROOT}/kmod/scripts/build.sh" oxp-wmi
+  "${ROOT}/kmod/scripts/install-oxp-wmi.sh"
+  "${ROOT}/kmod/scripts/test-oxp-wmi.sh" "${ROOT}/linux/oxp-wmi/oxp-wmi.ko"
+  exit 0
+fi
+
 if [[ ! -f "${ROOT}/kmod/oxpec/oxpec.c" ]]; then
   "${ROOT}/kmod/scripts/fetch-oxpec.sh" ogc
 fi
 "${ROOT}/kmod/scripts/inject-catalog.sh"
 
-"${ROOT}/kmod/scripts/build.sh"
+"${ROOT}/kmod/scripts/build.sh" oxpec
 "${ROOT}/kmod/scripts/install-common.sh"
 "${ROOT}/kmod/scripts/test-oxpec.sh" "${ROOT}/kmod/oxpec/oxpec.ko"

@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FETCH=""
 LIST=0
 INJECT_ONLY=0
+STACK=""
 
 usage() {
   cat <<'EOF'
@@ -15,6 +16,7 @@ Usage:
   apply-all.sh --fetch [src]   Refetch oxpec.c first (mainline|ogc|cachyos), then inject all
   apply-all.sh --list          Show the catalog without writing oxpec.c
   apply-all.sh --inject-only   Inject only (skip build; useful after --fetch)
+  apply-all.sh --stack NAME    oxpec | oxp-wmi | auto (default: detect this machine)
 
 Adding a second (or Nth) handheld:
   1. On that machine:  kmod/scripts/collect-dmi.sh --add
@@ -45,6 +47,14 @@ while [[ $# -gt 0 ]]; do
       INJECT_ONLY=1
       shift
       ;;
+    --stack)
+      if [[ $# -lt 2 ]]; then
+        echo "--stack needs oxpec|oxp-wmi|auto" >&2
+        exit 2
+      fi
+      STACK="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -58,7 +68,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$LIST" -eq 1 ]]; then
+  echo "this-machine: $("${ROOT}/kmod/scripts/ec-stack.sh" detect)"
   "${ROOT}/kmod/scripts/inject-catalog.sh" --list
+  exit 0
+fi
+
+if [[ -z "$STACK" ]]; then
+  STACK="$("${ROOT}/kmod/scripts/ec-stack.sh" detect)"
+fi
+echo "ec-stack=${STACK}"
+
+if [[ "$STACK" == oxp-wmi ]]; then
+  if [[ "$INJECT_ONLY" -eq 1 ]]; then
+    echo "oxp-wmi has no oxpec DMI inject; nothing to do"
+    exit 0
+  fi
+  "${ROOT}/kmod/scripts/build.sh" oxp-wmi
+  echo
+  echo "Next: sudo kmod/scripts/test-oxp-wmi.sh linux/oxp-wmi/oxp-wmi.ko"
+  echo "      sudo kmod/scripts/install-oxp-wmi.sh"
+  echo "      sudo kmod/scripts/install-inputplumber.sh"
   exit 0
 fi
 
@@ -78,7 +107,7 @@ if [[ "$INJECT_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
-"${ROOT}/kmod/scripts/build.sh"
+"${ROOT}/kmod/scripts/build.sh" oxpec
 echo
 echo "Next: sudo kmod/scripts/test-oxpec.sh kmod/oxpec/oxpec.ko"
 echo "      sudo kmod/scripts/install-common.sh"

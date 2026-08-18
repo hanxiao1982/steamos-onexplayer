@@ -1,78 +1,95 @@
-# 不等主线：两边都能走通的本地拉取、编译、测试、安装
+# Local fetch, build, test, and install without waiting for mainline
 
-不要为加一条 DMI 重编整棵内核。两边都已经带了 `oxpec` 源码逻辑，缺的只是新机 `board_name`。做法是：
+Do not rebuild the whole kernel just to add a DMI row. Both distros already ship the `oxpec` logic; a new AMD handheld usually only needs `board_name`. Procedure:
 
-1. 拉取当前的 `oxpec.c`
-2. 注入同一段 DMI（C 代码两边相同）
-3. 对着**正在运行的内核**头文件编出 `oxpec.ko`
-4. 从 `/var/lib/oxp-kmod` 加载（Bazzite 的 `/usr` 只读，这个路径两边都能写）
-5. 按键再叠 InputPlumber YAML，不改 HHD
+1. Fetch the current `oxpec.c`
+2. Inject the same DMI block (identical C on both distros)
+3. Build `oxpec.ko` against the **running** kernel headers
+4. Load it from `/var/lib/oxp-kmod` (writable on Bazzite; `/usr` is not)
+5. Overlay InputPlumber YAML for buttons. Do not touch HHD
 
-仓库里的工具在 `kmod/`。
+Tools live in `kmod/`.
 
 ---
 
-## 0. 先选路，不要一上来 `make -j` 整核
+## 0. Pick a path before `make -j` on a full kernel
 
-| 路径 | 做什么 | 什么时候用 |
+| Path | What it does | When to use it |
 | --- | --- | --- |
-| **A. 树外模块（推荐）** | 只编 `oxpec.ko` | 新机 EC 和已有变体相同，只缺 DMI。Bazzite / CachyOS 都走这条 |
-| B. 重编 CachyOS deckify | `makepkg` 打进 `0001-handheld.patch` | 要改寄存器逻辑，或树外模块对不上 vermagic |
-| C. 重编 Bazzite / OGC 整核 | Fedora RPM + ostree 换核 | 几乎不该为 DMI 这么做；成本高，还要签名 |
+| **A. Out-of-tree module (recommended)** | AMD: build `oxpec.ko`. **X2 Mini / Intel G3E: build `oxp-wmi.ko`** | New device only needs a DMI row (oxpec) or the in-repo OxpWMI driver. Works on Bazzite and CachyOS |
+| B. Rebuild CachyOS deckify | `makepkg` with `0001-handheld.patch` | New EC register logic, or the out-of-tree module cannot match vermagic |
+| C. Rebuild the Bazzite / OGC kernel | Fedora RPMs + ostree kernel swap | Almost never worth it for a DMI row; expensive and needs signing |
 
-`hid-oxp` 的 DMI quirk（hybrid MCU / RGB）也可以树外编，但依赖 HID/LED，比 `oxpec` 脆。先把风扇 hwmon 跑通，再考虑它。
+`hid-oxp` DMI quirks (hybrid MCU / RGB) can also be built out of tree, but they depend on HID/LED and are more fragile. Get fan hwmon working first.
 
 ---
 
-## 1. 真机采集 DMI（可反复执行，按型号累加）
+## 1. Collect DMI on the handheld (repeatable; one file per model)
 
-**可以。** 每台新机只追加一份 `kmod/devices/<slug>.env`，注入和 InputPlumber 安装会把目录里**所有**型号写进去。不要在同一个 `local-device.env` 里改来改去——那样会丢掉上一台。
+Each new machine adds one `kmod/devices/<slug>.env`. Inject and InputPlumber install apply **every** file in that directory. Do not reuse a single `local-device.env` and overwrite `BOARD_NAME` — that drops the previous model.
 
-在掌机上：
+On the handheld:
 
 ```bash
 cd /path/to/steamos-onexplayer
 chmod +x kmod/scripts/*.sh
-kmod/scripts/collect-dmi.sh --add          # 写入 kmod/devices/<slug>.env
-# 指定文件名：kmod/scripts/collect-dmi.sh --add f1-oled-2026
+kmod/scripts/collect-dmi.sh --add          # writes kmod/devices/<slug>.env
+# optional slug: kmod/scripts/collect-dmi.sh --add f1-oled-2026
 ```
 
-`--add` 只创建/覆盖**这一份**文件，其它 `devices/*.env` 不动。已存在时加 `--force` 才覆盖该文件。
+`--add` creates or replaces **that one file** only. Use `--force` to overwrite an existing file.
 
-把新 `.env` 拷回仓库（和旧的放在一起），之后在任意一台机器上：
+Copy the new `.env` back into the repo (keep the old ones). On any machine:
 
 ```bash
-kmod/scripts/apply-all.sh --list           # 看目录里有哪些型号
-kmod/scripts/apply-all.sh --fetch ogc      # 重新拉 oxpec.c，再注入全部型号后编译
+kmod/scripts/apply-all.sh --list           # catalog
+kmod/scripts/apply-all.sh --fetch ogc      # refetch oxpec.c, inject all models, build
 ```
 
-`fetch-oxpec.sh` 会覆盖 `oxpec.c`（注入丢失）；必须再跑一次注入。`apply-all.sh --fetch` 就是「拉新源码 + 把目录里每台机的 DMI 全部加回去」。再跑一遍注入是幂等的：已有的 `BOARD_NAME` 会 `skipped`，不会重复插入。
+`fetch-oxpec.sh` overwrites `oxpec.c` (injections are lost); inject again. `apply-all.sh --fetch` is “fetch upstream + put every catalogued DMI back”. Re-running inject is idempotent: existing `BOARD_NAME` rows are `skipped`.
 
-`kmod/local-device.env` 仍可作为额外一份（旧流程）；占位值 `ONEXPLAYER NEWMODEL` 会被跳过。`example.env` 和 `_*.env` 也不会注入。
+`kmod/local-device.env` is an optional extra (legacy). Placeholder `ONEXPLAYER NEWMODEL` is skipped. So are `example.env` and `_*.env`.
 
-`OXP_BOARD_VARIANT` 按 EC 选，不要按商品名猜：
+Choose `OXP_BOARD_VARIANT` from the EC map, not the marketing name:
 
-| 变体 | 适用 | 风扇寄存器 | Turbo |
+| Variant | Typical SKUs | Fan register | Turbo |
 | --- | --- | --- | --- |
 | `oxp_fly` | F1 / F1Pro / APEX | `0x76` | `0xF1` |
-| `oxp_x1` | X1 系列 | `0x58` | `0xEB` |
-| `oxp_2` | 2 系列 | `0x58` | `0xEB` |
-| `oxp_g1_a` / `oxp_g1_i` | G1 / SUPER X | G1 逻辑 | 机型相关 |
+| `oxp_x1` | X1 series | `0x58` | `0xEB` |
+| `oxp_2` | 2 series | `0x58` | `0xEB` |
+| `oxp_g1_a` / `oxp_g1_i` | G1 / SUPER X | G1 logic | model-specific |
+| `oxp_wmi` | **X2 Mini / X2 / OXP3 / Apex Air (Intel OxpWMI)** | `0x58`/`0x4A`/`0x4B` (PWM 0–184) | not oxpec |
 
-不确定时：先 `oxp_fly`，`insmod` 后看 `fan1_input` 是否像转速；明显不对再换变体。
+`collect-dmi.sh` writes `OXP_EC_STACK=oxp-wmi` for `ONEXPLAYER X2Mini` (not `X2Mini PRO`). The repo already ships `kmod/devices/x2-mini.env`.
+
+If the AMD variant is unknown: try `oxp_fly` first and check whether `fan1_input` looks like an RPM.
+
+### X2 Mini: build oxp-wmi, not oxpec
+
+Intel G3E has no ACPI EC for `oxpec`. Fan and charge go through WMI. After the scripts detect X2 Mini:
+
+```bash
+kmod/scripts/ec-stack.sh          # oxp-wmi
+kmod/scripts/apply-all.sh         # make -C $KDIR M=linux/oxp-wmi
+sudo kmod/scripts/test-oxp-wmi.sh
+sudo kmod/scripts/install-oxp-wmi.sh
+sudo kmod/scripts/install-inputplumber.sh
+```
+
+`install-cachyos.sh` / `install-bazzite.sh` / `ssh-handheld.sh … all` take this path automatically. Source is `linux/oxp-wmi/`; no `fetch-oxpec.sh`. See [ec/oxp-wmi.md](ec/oxp-wmi.md).
 
 ---
 
-## 2. 拉取源文件并写入同一段修改
+## 2. Fetch the source and apply the same edit
 
 ```bash
-# Bazzite 更接近 OGC 树；CachyOS 用 mainline 即可。两边注入脚本相同。
-kmod/scripts/fetch-oxpec.sh ogc        # 或 mainline / cachyos
-kmod/scripts/inject-catalog.sh         # 注入 kmod/devices/* 全部型号
-# 等价：kmod/scripts/apply-all.sh --fetch ogc --inject-only
+# Bazzite is closer to the OGC tree; CachyOS can use mainline. Same inject script.
+kmod/scripts/fetch-oxpec.sh ogc        # or mainline / cachyos
+kmod/scripts/inject-catalog.sh         # every kmod/devices/* model
+# same as: kmod/scripts/apply-all.sh --fetch ogc --inject-only
 ```
 
-注入结果等价于在 `dmi_table[]` 里加：
+Injection is equivalent to adding this to `dmi_table[]`:
 
 ```c
 {
@@ -84,47 +101,47 @@ kmod/scripts/inject-catalog.sh         # 注入 kmod/devices/* 全部型号
 },
 ```
 
-`NEWMODEL` 必须换成 `collect-dmi.sh` 读到的 **`board_name`**。这就是两边共用的修改代码。
+Replace `NEWMODEL` with the **`board_name`** from `collect-dmi.sh`. That is the shared change for both distros.
 
-源码 URL：
+Source URLs:
 
-| 参数 | 文件 |
+| Argument | File |
 | --- | --- |
 | `mainline` | `https://raw.githubusercontent.com/torvalds/linux/master/drivers/platform/x86/oxpec.c` |
-| `ogc` | `OpenGamingCollective/linux` 的 `features/onexplayer` 同一路径 |
-| `cachyos` | `CachyOS/linux` 的 `master` 同一路径 |
+| `ogc` | same path on `OpenGamingCollective/linux` `features/onexplayer` |
+| `cachyos` | same path on `CachyOS/linux` `master` |
 
 ---
 
-## 3. 编译（对着本机 `uname -r`）
+## 3. Build against this machine’s `uname -r`
 
 ```bash
 kmod/scripts/build.sh
 ```
 
-脚本会：
+The script:
 
-- 使用 `/lib/modules/$(uname -r)/build`
-- 若 `.config` 里有 `CONFIG_CC_IS_CLANG=y`，自动加 `LLVM=1`（CachyOS 默认核常见；deckify 多为 GCC）
-- 在 `kmod/oxpec/oxpec.ko` 产出模块
+- uses `/lib/modules/$(uname -r)/build`
+- adds `LLVM=1` if `.config` has `CONFIG_CC_IS_CLANG=y` (common on default CachyOS; deckify is usually GCC)
+- writes `kmod/oxpec/oxpec.ko` (or `linux/oxp-wmi/oxp-wmi.ko` on X2 Mini)
 
-### CachyOS 头文件
+### CachyOS headers
 
 ```bash
 sudo pacman -S --needed linux-cachyos-deckify-headers base-devel pahole
-# 确认掌机跑的就是 deckify
-uname -r    # 应类似 7.1.8-1-cachyos-deckify
+# confirm the handheld is actually running deckify
+uname -r    # e.g. 7.1.8-1-cachyos-deckify
 ```
 
-一键（root，目录里已有至少一份真实的 `devices/*.env`）：
+One-shot (root; at least one real `devices/*.env` in the catalog):
 
 ```bash
 sudo kmod/scripts/install-cachyos.sh
 ```
 
-### Bazzite 头文件（最容易卡死的一步）
+### Bazzite headers (the usual blocker)
 
-镜像经常**不带** `kernel-devel`。先看：
+Images often **ship no** `kernel-devel`. Check:
 
 ```bash
 ls -l /lib/modules/$(uname -r)/build
@@ -132,20 +149,20 @@ rpm -q kernel-devel kernel-devel-matched || true
 uname -r
 ```
 
-- 若 `build` 是有效目录：直接 `kmod/scripts/build.sh`
-- 若没有：必须装 **vermagic 完全一致** 的 OGC `kernel-devel`，不要 layer 官方 Fedora 的 `kernel-devel`
+- If `build` is a real directory: run `kmod/scripts/build.sh`
+- If not: install the OGC `kernel-devel` whose **vermagic matches exactly**. Do not layer stock Fedora `kernel-devel`
 
 ```bash
-# 只示例：版本必须改成你的 uname -r
+# example only: the version must be your uname -r
 rpm-ostree install /path/to/kernel-devel-$(uname -r).rpm
 sudo systemctl reboot
 ```
 
-OGC 的 devel RPM 跟内核 RPM 一起出，看 [OpenGamingCollective/kernel-packages](https://github.com/OpenGamingCollective/kernel-packages) 的 Fedora 构建产物，或当前 Bazzite 镜像构建日志里的 `kernel-devel`。对不上就 `Invalid module format`。
+OGC ships devel RPMs next to the kernel RPMs. See Fedora artifacts on [OpenGamingCollective/kernel-packages](https://github.com/OpenGamingCollective/kernel-packages), or `kernel-devel` in the current Bazzite image build log. A mismatch yields `Invalid module format`.
 
-没有匹配 devel 时的退路：在另一台已装同一 `kernel-devel` 的 Fedora 上编好 `oxpec.ko`，拷到掌机再 `install-common.sh`。Apex 社区插件就是预编译多版本 `.ko`。
+Fallback without matching devel: build `oxpec.ko` on another Fedora box with that same `kernel-devel`, copy it to the handheld, run `install-common.sh`. The Apex community plugin does the same with prebuilt `.ko` files.
 
-一键（root，且 `build` 已存在、Secure Boot 已关）：
+One-shot (root, `build` present, Secure Boot off):
 
 ```bash
 sudo kmod/scripts/install-bazzite.sh
@@ -153,21 +170,21 @@ sudo kmod/scripts/install-bazzite.sh
 
 ---
 
-## 4. 本地测试
+## 4. Local test
 
-未加载（普通用户）：
+Without loading (normal user):
 
 ```bash
 kmod/scripts/test-oxpec.sh
 ```
 
-加载并探 hwmon（root）：
+Load and probe hwmon (root):
 
 ```bash
 sudo kmod/scripts/test-oxpec.sh kmod/oxpec/oxpec.ko
 ```
 
-成功时会看到类似：
+Success looks like:
 
 ```
 found /sys/class/hwmon/hwmonN (name=oxpec)
@@ -176,7 +193,7 @@ found /sys/class/hwmon/hwmonN (name=oxpec)
   pwm1_enable=...
 ```
 
-手动风扇冒烟（确认后再交回自动，避免一直狂转）：
+Manual fan smoke test (return to auto afterwards so it does not stay pegged):
 
 ```bash
 HWMON=$(ls -d /sys/class/hwmon/hwmon* | while read d; do
@@ -185,72 +202,72 @@ done)
 echo 1 > "$HWMON/pwm1_enable"
 echo 80 > "$HWMON/pwm1"
 sleep 3
-echo 2 > "$HWMON/pwm1_enable"   # 2=自动；老 ABI 则写 0
+echo 2 > "$HWMON/pwm1_enable"   # 2 = auto; older ABI uses 0
 ```
 
-失败对照：
+Failure table:
 
-| 现象 | 原因 | 处理 |
+| Symptom | Cause | Fix |
 | --- | --- | --- |
-| `Invalid module format` | vermagic ≠ `uname -r` | 换匹配的 headers 重编 |
-| `Key was rejected by service` / `Required key not available` | Secure Boot | 关 SB，或自签 MOK |
-| `insmod` 成功但无 hwmon | `board_name` 不匹配 | 重跑 `collect-dmi.sh`，注意空格/大小写 |
-| `modprobe: FATAL: Module oxpec is in use` | 用户态占着 hwmon | 先停 InputPlumber/风扇服务再 `-r` |
-| 无法 `modprobe -r oxpec` | `CONFIG_OXPEC=y` 编进内核 | 只能走路径 B/C 重编内核 |
+| `Invalid module format` | vermagic ≠ `uname -r` | rebuild against matching headers |
+| `Key was rejected by service` / `Required key not available` | Secure Boot | disable SB, or sign with a MOK |
+| `insmod` succeeds but no hwmon | `board_name` mismatch | rerun `collect-dmi.sh`; watch spaces/case |
+| `modprobe: FATAL: Module oxpec is in use` | userspace holds hwmon | stop InputPlumber / fan services, then `-r` |
+| cannot `modprobe -r oxpec` | `CONFIG_OXPEC=y` built-in | path B/C only (rebuild the kernel) |
 
-看是否内建：
+Check built-in vs module:
 
 ```bash
 grep OXPEC /lib/modules/$(uname -r)/config
-# 或
+# or
 zgrep CONFIG_OXPEC /proc/config.gz
 ```
 
-`=m` 才能替换。
+Only `=m` can be replaced.
 
-### 签名会不会让「只编一个模块」装不上现有内核？
+### Can signing block an out-of-tree module on the running kernel?
 
-**会，但这和「只编 oxpec、不重编整核」没有直接关系。** 树外 `oxpec.ko` 默认**没有**发行版内核那套签名；现有内核该不该收它，看两道互相独立的门：
+**Yes, but that is not because you only built one module.** A local `oxpec.ko` is unsigned by default. The running kernel accepts it only if two independent gates pass:
 
-| 门槛 | 卡的是什么 | 典型报错 | 和「只编一个模块」的关系 |
+| Gate | What it checks | Typical error | Relation to “module-only build” |
 | --- | --- | --- | --- |
-| **vermagic** | `.ko` 必须对着**正在跑的** `uname -r` 头文件编 | `Invalid module format` | 只编模块反而正确：不要用另一台机器/另一个 kernel-devel 的产物 |
-| **签名** | Secure Boot 开启，或 `CONFIG_MODULE_SIG_FORCE=y` | `Key was rejected by service` / `Required key not available` | 发行版自带的 `oxpec.ko` 随内核 RPM 签过名；你本地 `make` 出来的那份不会自动带上这把钥匙 |
+| **vermagic** | `.ko` must be built against **this** `uname -r` | `Invalid module format` | Building only the module is correct; do not reuse another machine’s `kernel-devel` |
+| **Signature** | Secure Boot on, or `CONFIG_MODULE_SIG_FORCE=y` | `Key was rejected by service` / `Required key not available` | Distro `oxpec.ko` is signed with the kernel RPM; your `make` output is not |
 
-常见组合：
+Typical combinations:
 
-- **CachyOS，Secure Boot 关着，且没有 FORCE**：未签名的本地 `.ko` 可以 `insmod`。这是最省事的路径。
-- **Bazzite 默认开 Secure Boot**：未签名模块会被拒。`ujust enroll-secure-boot-key` 只登记 Universal Blue 的密钥，**不会**让你的 `oxpec.ko` 通过。
-- **`CONFIG_MODULE_SIG=y` 但 FORCE 未开、SB 已关**：内核「会签名官方模块」，但仍允许未签名的树外模块。只编 `oxpec` 没问题。
-- **`CONFIG_MODULE_SIG_FORCE=y`**：关 SB 也不行，必须用内核信任的密钥签这个 `.ko`。
+- **CachyOS, Secure Boot off, no FORCE:** unsigned local `.ko` can `insmod`. Easiest path.
+- **Bazzite with Secure Boot on (default):** unsigned modules are rejected. `ujust enroll-secure-boot-key` enrolls Universal Blue’s key only and **does not** sign your `.ko`.
+- **`CONFIG_MODULE_SIG=y`, FORCE off, SB off:** official modules are signed; unsigned out-of-tree modules are still allowed.
+- **`CONFIG_MODULE_SIG_FORCE=y`:** disabling SB is not enough; sign the `.ko` with a key the kernel trusts.
 
-`check-env.sh` / `ssh-handheld.sh check` 会读 `CONFIG_MODULE_SIG*` 和 `mokutil --sb-state`。Bazzite 上开着 SB 会直接 `[FAIL]`。
+`check-env.sh` / `ssh-handheld.sh check` read `CONFIG_MODULE_SIG*` and `mokutil --sb-state`. Bazzite with SB on is a hard `[FAIL]`.
 
-要过签名门，三选一（从省事到重）：
+To pass the signature gate (easiest first):
 
-1. 固件里关掉 Secure Boot（本地适配推荐）
-2. 自己生成 MOK，用内核树里的 `scripts/sign-file` 签 `oxpec.ko`，再 `mokutil --import` 登记（不是 ujust 那把发行版钥匙）
-3. 把 DMI 打进 OGC / CachyOS 官方内核，用他们签过名的模块，不再树外加载
+1. Disable Secure Boot in firmware (recommended for local bring-up)
+2. Create a MOK, sign with the kernel tree’s `scripts/sign-file`, enroll with `mokutil --import` (not the ujust distro key)
+3. Land the DMI in the official OGC / CachyOS kernel and use their signed module
 
-签名过不了时，**重编整核也不会自动解决**——整核 RPM 同样要按发行版流程签名。只编模块不是根因。
+Rebuilding the whole kernel does **not** fix signing by itself — those RPMs still follow the distro signing process.
 
 ---
 
-## 5. 本地部署（开机自动加载）
+## 5. Local deploy (load at boot)
 
-`install-common.sh` 做的事情两边一样：
+`install-common.sh` is the same on both distros:
 
-- 把 `oxpec.ko` 放到 `/var/lib/oxp-kmod/oxpec.ko`
-- 写入 `/etc/systemd/system/oxpec-local.service`（先卸 in-tree `oxpec` 再 `insmod`）
+- copy `oxpec.ko` to `/var/lib/oxp-kmod/oxpec.ko`
+- write `/etc/systemd/system/oxpec-local.service` (unload in-tree `oxpec`, then `insmod`)
 - `systemctl enable --now oxpec-local.service`
 
 ```bash
 sudo kmod/scripts/install-common.sh
 ```
 
-Bazzite 不要往 `/usr/lib/modules` 里塞未签名模块，更新一次 ostree 就没了。`/var` + `/etc` 能活过日常更新；**内核小版本一变就要重编**。
+On Bazzite do not drop an unsigned module into `/usr/lib/modules`; the next ostree update removes it. `/var` + `/etc` survive routine updates; **rebuild after every kernel ABI bump**.
 
-CachyOS 若希望内核升级后自动重编：
+CachyOS auto-rebuild after kernel upgrades:
 
 ```bash
 sudo pacman -S --needed dkms
@@ -260,84 +277,84 @@ sudo dkms install oxpec-local/1.0.0
 
 ---
 
-## 6. 按键：InputPlumber 本地叠加（仍然不改 HHD）
+## 6. Buttons: local InputPlumber overlay (still no HHD)
 
 ```bash
-# 按 kmod/devices/*.env 各写一份 50-onexplayer-local-<slug>.yaml
-# 以及一份包含全部 DMI 的 /etc/udev/hwdb.d/61-oxp-local.hwdb
+# one 50-onexplayer-local-<slug>.yaml per kmod/devices/*.env
+# plus /etc/udev/hwdb.d/61-oxp-local.hwdb with every DMI line
 sudo kmod/scripts/install-inputplumber.sh
 journalctl -u inputplumber -b --no-pager | tail -n 50
 ```
 
-模板：`kmod/inputplumber/50-onexplayer_local.yaml`。`phys_path` 因主板 USB 口而异，先用 `name` + `handler` 宽匹配，再在 `evtest` / `udevadm info` 里收紧。
+Template: `kmod/inputplumber/50-onexplayer_local.yaml`. `phys_path` varies by USB port; start with wide `name` + `handler` matches, then tighten with `evtest` / `udevadm info`.
 
-`OXP_CAP_MAP`：APEX 类用 `oxp8`，X1 类试 `oxp5`。每份 `.env` 可不同。
+`OXP_CAP_MAP`: APEX-class `oxp8`, X1-class try `oxp5`. Each `.env` can differ.
 
-CachyOS 新装还要把 `product_name` 加进 chwd `handhelds/profiles.toml` 的正则，否则下一台机器不会自动装 InputPlumber。本机手工 `pacman -S inputplumber` 即可先测。
+A fresh CachyOS install also needs the `product_name` in chwd `handhelds/profiles.toml`, or the next machine will not pull InputPlumber automatically. For a one-off test: `sudo pacman -S inputplumber`.
 
 ---
 
-## 7. 路径 B：CachyOS 把补丁打进 deckify（可选）
+## 7. Path B: fold the patch into CachyOS deckify (optional)
 
-树外模块验证通过后，再做成发行版补丁：
+After the out-of-tree module works, turn it into a distro patch:
 
 ```bash
 git clone https://github.com/CachyOS/linux-cachyos.git
 cd linux-cachyos/linux-cachyos-deckify
-# 把针对 oxpec.c 的 diff 存成 0002-oxp-local.patch
-# 写入 PKGBUILD 的 source=()
+# save the oxpec.c diff as 0002-oxp-local.patch
+# add it to PKGBUILD source=()
 makepkg -s
 sudo pacman -U linux-cachyos-deckify-*.pkg.tar.zst \
                linux-cachyos-deckify-headers-*.pkg.tar.zst
 ```
 
-`prepare()` 会对所有 `*.patch` 执行 `patch -Np1`。合入官方则 PR 到 `CachyOS/kernel-patches`。
+`prepare()` runs `patch -Np1` on every `*.patch`. Upstream inclusion is a PR to `CachyOS/kernel-patches`.
 
-整核编译要很久，只为 DMI 时不必走这条。
-
----
-
-## 8. 路径 C：Bazzite 为什么不建议整核
-
-Bazzite 是 ostree 镜像，内核来自 OGC 签名 RPM。本地重编整核需要：
-
-1. 按 `OpenGamingCollective/kernel-packages` 打 `monolithic.patch`
-2. 出 kernel / kernel-core / kernel-modules RPM
-3. `rpm-ostree override replace` 整组包
-4. Secure Boot 下还要签名
-
-只为一条 DMI，用树外 `oxpec.ko` + 关 SB 即可。Apex 社区也是这么做的。
-
-`ujust enroll-secure-boot-key` 只登记 Universal Blue 的密钥，**不会**让你的未签名 `.ko` 通过。
+A full kernel build takes a long time; skip it for a DMI-only change.
 
 ---
 
-## 9. 用 SSH 从电脑拷到掌机
+## 8. Path C: why not rebuild the Bazzite kernel
 
-掌机能 SSH 登入时，不必在掌机屏幕上操作。电脑上：
+Bazzite is an ostree image; the kernel is a signed OGC RPM. A local full rebuild needs:
+
+1. Apply `monolithic.patch` via `OpenGamingCollective/kernel-packages`
+2. Produce kernel / kernel-core / kernel-modules RPMs
+3. `rpm-ostree override replace` the set
+4. Sign again if Secure Boot is on
+
+For one DMI row, out-of-tree `oxpec.ko` plus SB off is enough. The Apex community does the same.
+
+`ujust enroll-secure-boot-key` only enrolls Universal Blue’s key. It will **not** accept your unsigned `.ko`.
+
+---
+
+## 9. Copy the repo to the handheld over SSH
+
+If the handheld has SSH, you do not need its on-screen keyboard. From a PC:
 
 ```bash
 kmod/scripts/ssh-handheld.sh bazzite@192.168.1.50 all
 ```
 
-这会 rsync/tar 拷仓库、先跑 `check-env.sh`（内核头文件、gcc/clang、Secure Boot、DMI、GitHub 等），再远程 `collect-dmi.sh --add`、辨认 Bazzite/CachyOS 后编译安装，最后把新的 `devices/*.env` 拉回电脑。有 `[FAIL]` 会停。完整命令、手写 ssh/scp、离线掌机见 [ssh-deploy.md](ssh-deploy.md)。
+That rsync/tar-copies the repo, runs `check-env.sh` (headers, gcc/clang, Secure Boot, DMI, GitHub), then remote `collect-dmi.sh --add`, detects Bazzite vs CachyOS, builds and installs, and pulls the new `devices/*.env` back. A `[FAIL]` stops the run. Full commands, raw ssh/scp, and offline handhelds: [ssh-deploy.md](ssh-deploy.md).
 
 ---
 
-## 10. 推荐工作顺序
+## 10. Suggested order
 
 ```
-真机 collect-dmi.sh --add          # 只追加这一台
-    -> 把新的 devices/<slug>.env 放进仓库（保留旧的）
-    -> apply-all.sh --fetch ogc    # 拉源码 + 注入全部型号 + 编译
-    -> sudo test-oxpec.sh          # 看到 hwmon
+On the handheld: collect-dmi.sh --add          # this model only
+    -> commit the new devices/<slug>.env (keep old ones)
+    -> apply-all.sh --fetch ogc                # fetch + inject all + build
+    -> sudo test-oxpec.sh                      # hwmon present
     -> sudo install-common.sh
     -> sudo install-inputplumber.sh
-    -> 再把同一份 DMI diff 送 LKML / OGC / CachyOS
-换下一台：重复 --add，不要覆盖上一份 .env
+    -> send the same DMI diff to LKML / OGC / CachyOS
+Next machine: --add again; do not overwrite the previous .env
 ```
 
-内核模块文件：`kmod/oxpec/oxpec.c`（拉取后注入，不要提交）。  
-型号目录：`kmod/devices/*.env`。  
-用户态按键：每型号一份 `50-onexplayer-local-<slug>.yaml`。  
-不要写 HHD。
+Kernel module source: `kmod/oxpec/oxpec.c` (fetched then injected; do not commit).  
+Model catalog: `kmod/devices/*.env`.  
+Userspace buttons: one `50-onexplayer-local-<slug>.yaml` per model.  
+Do not write HHD.

@@ -14,7 +14,10 @@ VALID_VARIANTS = {
     "oxp_mini_amd",
     "oxp_mini_amd_a07",
     "oxp_mini_amd_pro",
+    "oxp_wmi",  # Intel OxpWMI (X2 Mini / G3E); not an oxpec enum
 }
+
+OXPEC_VARIANTS = VALID_VARIANTS - {"oxp_wmi"}
 
 PLACEHOLDERS = {"", "UNKNOWN", "ONEXPLAYER NEWMODEL", "NEWMODEL"}
 
@@ -52,6 +55,11 @@ def normalize(env: dict[str, str], source: Path) -> dict[str, str]:
     env.setdefault("OXP_SYS_VENDOR", env["OXP_BOARD_VENDOR"])
     env.setdefault("OXP_PRODUCT_NAME", env["OXP_BOARD_NAME"])
     env.setdefault("OXP_CAP_MAP", "oxp8")
+    if variant == "oxp_wmi" or env.get("OXP_EC_STACK") == "oxp-wmi":
+        env["OXP_EC_STACK"] = "oxp-wmi"
+        env["OXP_BOARD_VARIANT"] = "oxp_wmi"
+    else:
+        env.setdefault("OXP_EC_STACK", "oxpec")
     env["SLUG"] = env.get("OXP_SLUG") or slugify(env["OXP_BOARD_NAME"])
     env["SOURCE"] = str(source)
     return env

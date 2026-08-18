@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
-# Build oxpec.ko against the running kernel. Works on CachyOS and Bazzite
-# once that kernel's build tree is present.
+# Build oxpec.ko and/or oxp-wmi.ko against the running kernel.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SRC="${ROOT}/kmod/oxpec"
 KREL="${KERNELRELEASE:-$(uname -r)}"
 KDIR="${KDIR:-/lib/modules/${KREL}/build}"
+STACK="${1:-auto}"
 
-if [[ ! -f "${SRC}/oxpec.c" ]]; then
-  echo "oxpec.c missing; run kmod/scripts/fetch-oxpec.sh first" >&2
-  exit 1
+if [[ "$STACK" == auto ]]; then
+  STACK="$("${ROOT}/kmod/scripts/ec-stack.sh" detect)"
 fi
+
+case "$STACK" in
+  oxpec|oxp-wmi|all) ;;
+  *)
+    echo "usage: $0 [auto|oxpec|oxp-wmi|all]" >&2
+    exit 2
+    ;;
+esac
+
 if [[ ! -d "${KDIR}" ]]; then
   cat >&2 <<EOF
 No kernel build tree at ${KDIR}
@@ -27,7 +34,30 @@ if [[ -f "${KDIR}/.config" ]] && grep -q '^CONFIG_CC_IS_CLANG=y' "${KDIR}/.confi
   MAKE_ARGS+=(LLVM=1)
 fi
 
-echo "Building oxpec.ko for ${KREL}"
-make -C "${KDIR}" M="${SRC}" KERNELRELEASE="${KREL}" "${MAKE_ARGS[@]}" modules
-modinfo "${SRC}/oxpec.ko" | sed -n 's/^filename:\|^version:\|^vermagic:\|^description:/&/p'
-echo "OK ${SRC}/oxpec.ko"
+build_one() {
+  local src="$1" ko="$2" label="$3"
+  if [[ ! -f "${src}/$(basename "${ko}" .ko).c" && ! -f "${src}/${label}.c" ]]; then
+    echo "missing source in ${src}" >&2
+    exit 1
+  fi
+  echo "Building ${label}.ko for ${KREL} from ${src}"
+  make -C "${KDIR}" M="${src}" KERNELRELEASE="${KREL}" "${MAKE_ARGS[@]}" modules
+  modinfo "${src}/${label}.ko" | sed -n 's/^filename:\|^version:\|^vermagic:\|^description:/&/p'
+  echo "OK ${src}/${label}.ko"
+}
+
+if [[ "$STACK" == oxpec || "$STACK" == all ]]; then
+  if [[ ! -f "${ROOT}/kmod/oxpec/oxpec.c" ]]; then
+    echo "oxpec.c missing; run kmod/scripts/fetch-oxpec.sh first" >&2
+    exit 1
+  fi
+  build_one "${ROOT}/kmod/oxpec" oxpec.ko oxpec
+fi
+
+if [[ "$STACK" == oxp-wmi || "$STACK" == all ]]; then
+  if [[ ! -f "${ROOT}/linux/oxp-wmi/oxp-wmi.c" ]]; then
+    echo "linux/oxp-wmi/oxp-wmi.c missing" >&2
+    exit 1
+  fi
+  build_one "${ROOT}/linux/oxp-wmi" oxp-wmi.ko oxp-wmi
+fi
