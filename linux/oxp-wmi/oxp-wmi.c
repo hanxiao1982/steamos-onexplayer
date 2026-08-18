@@ -530,9 +530,23 @@ static int oxp_wmi_write_raw(struct oxp_wmi_data *data, u8 reg, u8 value,
 			     int mode)
 {
 	u8 out[OXP_WMI_OUT_LEN];
+	u32 packed = oxp_wmi_pack_write_mode(reg, value, mode);
+	u32 method = oxp_wmi_write_method(mode);
+	int ret;
 
-	return oxp_wmi_query(data, oxp_wmi_write_method(mode),
-			     oxp_wmi_pack_write_mode(reg, value, mode), out);
+	ret = oxp_wmi_query(data, method, packed, out);
+	if (ret)
+		return ret;
+
+	/*
+	 * Method 2 readback succeeds but 0x4B is cleared in ~200ms and RPM
+	 * does not move (X2 Mini Linux live). MOF: method 3 writes one
+	 * register and returns several — treat it as the apply.
+	 */
+	if (method != OXP_WMI_WRITE_READ_EC)
+		oxp_wmi_query(data, OXP_WMI_WRITE_READ_EC, packed, out);
+
+	return 0;
 }
 
 static int oxp_wmi_write(struct oxp_wmi_data *data, u8 reg, u8 value)
@@ -958,6 +972,27 @@ static ssize_t oxp_dbg_write_ec_write(struct file *file, const char __user *ubuf
 	return ret ? ret : 2;
 }
 
+static ssize_t oxp_dbg_eval_write(struct file *file, const char __user *ubuf,
+				  size_t len, loff_t *off)
+{
+	struct oxp_wmi_data *data = file->private_data;
+	u8 buf[5];
+	u8 out[OXP_WMI_OUT_LEN];
+	u32 in_val;
+	int ret;
+
+	if (*off || len < 5)
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, 5))
+		return -EFAULT;
+	if (buf[0] < 1 || buf[0] > 3)
+		return -EINVAL;
+	in_val = buf[1] | ((u32)buf[2] << 8) | ((u32)buf[3] << 16) |
+		 ((u32)buf[4] << 24);
+	ret = oxp_wmi_query(data, buf[0], in_val, out);
+	return ret ? ret : 5;
+}
+
 static ssize_t oxp_dbg_last_out_read(struct file *file, char __user *ubuf,
 				     size_t len, loff_t *off)
 {
@@ -1014,6 +1049,14 @@ static const struct file_operations oxp_dbg_last_info_fops = {
 	.llseek	= default_llseek,
 };
 
+static const struct file_operations oxp_dbg_eval_fops = {
+	.owner	= THIS_MODULE,
+	.open	= oxp_dbg_ec_open,
+	.write	= oxp_dbg_eval_write,
+	.read	= oxp_dbg_last_out_read,
+	.llseek	= default_llseek,
+};
+
 static void oxp_wmi_debugfs_remove(void *dentry)
 {
 	debugfs_remove_recursive(dentry);
@@ -1039,6 +1082,7 @@ static void oxp_wmi_debugfs_init(struct oxp_wmi_data *data)
 	debugfs_create_file("write_ec", 0600, dir, data, &oxp_dbg_write_ec_fops);
 	debugfs_create_file("last_info", 0400, dir, data,
 			    &oxp_dbg_last_info_fops);
+	debugfs_create_file("eval", 0600, dir, data, &oxp_dbg_eval_fops);
 }
 
 /* ---- probe ---- */
@@ -1171,6 +1215,6 @@ module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
 MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
-MODULE_VERSION("0.3");
+MODULE_VERSION("0.4");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);
