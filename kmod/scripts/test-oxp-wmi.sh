@@ -6,12 +6,38 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 KO="${1:-${ROOT}/linux/oxp-wmi/oxp-wmi.ko}"
 GUID="43B5A593-AD62-4257-8546-91B0797BEC1B"
 
+echo "== source / module version =="
+if [[ -d "${ROOT}/.git" ]]; then
+  echo "git = $(git -C "${ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown) $(git -C "${ROOT}" log -1 --pretty=%s 2>/dev/null || true)"
+fi
+if [[ -f "${ROOT}/linux/oxp-wmi/oxp-wmi.c" ]]; then
+  if grep -q 'in_len_param' "${ROOT}/linux/oxp-wmi/oxp-wmi.c"; then
+    echo "oxp-wmi.c has 32-byte in_len probe (0.2+)"
+  else
+    echo "oxp-wmi.c is the old 4-byte-only driver. git pull the PR branch and rebuild." >&2
+    exit 1
+  fi
+fi
+
+echo
 echo "== module file =="
 if [[ ! -f "${KO}" ]]; then
   echo "missing ${KO}; build first (kmod/scripts/build.sh oxp-wmi)" >&2
   exit 1
 fi
 modinfo "${KO}"
+ver="$(modinfo -F version "${KO}" 2>/dev/null || true)"
+parms="$(modinfo -F parm "${KO}" 2>/dev/null || true)"
+echo "ko version = ${ver:-"(none)"}"
+if ! grep -q '^in_len:' <<<"${parms}"; then
+  echo >&2
+  echo "This .ko is older than the 32-byte buffer patch (no in_len parm, version != 0.2)." >&2
+  echo "You are still testing the original driver. Rebuild after updating the tree:" >&2
+  echo "  git fetch origin && git checkout cursor/oxp-kernel-module-research-0b45 && git pull" >&2
+  echo "  kmod/scripts/build.sh oxp-wmi" >&2
+  echo "  sudo rmmod oxp_wmi 2>/dev/null; sudo $0 ${KO}" >&2
+  exit 1
+fi
 
 echo
 echo "== running kernel =="

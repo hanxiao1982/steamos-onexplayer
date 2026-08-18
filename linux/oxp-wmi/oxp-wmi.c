@@ -981,5 +981,6 @@ module_exit(oxp_wmi_exit);
 
 MODULE_AUTHOR("steamos-onexplayer");
 MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
+MODULE_VERSION("0.2");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);
