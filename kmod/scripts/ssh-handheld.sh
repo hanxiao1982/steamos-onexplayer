@@ -14,8 +14,8 @@ Usage (on your PC, not on the handheld):
   ssh-handheld.sh user@host collect [--add [slug]] [--force]
   ssh-handheld.sh user@host pull-devices
   ssh-handheld.sh user@host install
-  ssh-handheld.sh user@host check            # SSH 后检查编译/采集环境（可先于 push）
-  ssh-handheld.sh user@host status           # 同 check
+  ssh-handheld.sh user@host check            # env probe after SSH (works before push)
+  ssh-handheld.sh user@host status           # alias for check
   ssh-handheld.sh user@host all              # push + check + collect --add + install + pull-devices
   ssh-handheld.sh user@host run -- <cmd>     # remote shell in the copied repo
 
