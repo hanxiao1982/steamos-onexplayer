@@ -85,10 +85,23 @@ out[1…] = payload
 Kernel call site (the piece to copy, not the MSI GUID):
 
 ```c
+u8 input[32] = { 0 };
+u8 output[32];
+struct acpi_buffer in = { .length = sizeof(input), .pointer = input };
+struct acpi_buffer out = { ACPI_ALLOCATE_BUFFER, NULL };
+
+mutex_lock(&data->wmi_lock);
 status = wmidev_evaluate_method(data->wdev, 0x0, method, &in, &out);
+mutex_unlock(&data->wmi_lock);
+
+/* output must be ACPI_TYPE_BUFFER of length 32; byte[0] == 0 is failure */
 ```
 
+That is the entire read/write path. There is no `_WDG` walk and no ACPI Integer Arg2. Fan RPM is `Get_Fan` (method 0x11) with a zeroed 32-byte input; register-style R/W on Claw patches is `Get_Data` / `Set_Data` (0x1b / 0x1c) with `input[0] = address`.
+
 Firmware AML is not thread-safe; the driver takes its own mutex. Debugfs (`/sys/kernel/debug/msi-wmi-platform-<dev>/`) can poke any method with a raw 32-byte buffer.
+
+`oxp-wmi` copies this evaluate/mutex/32-byte-input shape. It does **not** copy MSI's method table, 32-byte output requirement, or status polarity (`0x00` is success on OxpWMI).
 
 ## Side-by-side with OneXPlayer OxpWMI
 
@@ -172,8 +185,8 @@ Do not write until that is confirmed. Method 3 may fill more of the 8-byte retur
 Copy the **call pattern** from `msi-wmi-platform`, not the method table.
 
 1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
-2. Resolve `WMxx` from `_WDG` and call `acpi_evaluate_object` with Arg2 as an **ACPI Integer** (`GroupOffset` / `GroupOffsetValue`). `wmidev_evaluate_method()` always types Arg2 as Buffer (or String if `_WDG` has the STRING flag). On X2 Mini that path can succeed with every EC byte `0`. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
-3. Integer value is the little-endian `UInt32`: read `0x04 | (reg << 8)`; write likely `0x04 | (reg << 8) | (value << 16)`. Parse output byte[0] as status, byte[1] as the register. Also accept comma-hex `uStringReturn` and a Package `{ ReturnValue, string }` / eight integers. Do **not** pass JS `0x400+reg` as the UInt32.
+2. Same call as `msi_wmi_platform_query()`: mutex + `wmidev_evaluate_method(wdev, 0x0, method_id, in, out)`. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
+3. Input is a **32-byte** zeroed Buffer (MSI / Windows `CreateByteField()` quirk) with the LE `UInt32` in the first four bytes: read `0x04 | (reg << 8)`; write likely `0x04 | (reg << 8) | (value << 16)`. Do **not** pass JS `0x400+reg`. Output is an 8-byte block or hex `uStringReturn` (status `0x00` = ok, inverted vs MSI). Also accept a Package `{ ReturnValue, string }`.
 4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, PWM 0–184, charge `0xA3`/`0xA4`). Skip `0xEB` / `0xA5` on X2 Mini (live unused).
 5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
 

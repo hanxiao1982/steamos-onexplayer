@@ -8,12 +8,11 @@ OneXPlayer Intel handhelds that use OxpWMI (``SuRwECRegInterface``) expose
 EC RAM through ACPI-WMI, not through the ACPI Embedded Controller address
 space that ``oxpec`` uses on AMD boards.
 
-This driver is the Linux client for that interface. The call pattern matches
-``msi-wmi-platform`` (mutex around the ``WMxx`` evaluate). The GUID and method
-table do not. Windows CIM sends ``GroupOffset`` as an ACPI Integer; this driver
-calls ``WMxx`` the same way after reading the object id from ``_WDG``. Using
-``wmidev_evaluate_method()`` alone passes Arg2 as a Buffer/String and can
-return status ``0x00`` with every EC value ``0``.
+This driver is the Linux client for that interface. The call path matches
+``msi-wmi-platform``: a driver mutex around
+``wmidev_evaluate_method(wdev, 0x0, method, in, out)``, with a **32-byte**
+zeroed input buffer (Windows ``CreateByteField()`` quirk). The GUID, method
+IDs, and payload layout do not match MSI.
 
 WMI interface
 =============
@@ -21,12 +20,12 @@ WMI interface
 GUID ``43B5A593-AD62-4257-8546-91B0797BEC1B``
 Windows class ``SuRwECRegInterface`` (``root\\WMI``)
 
-========  ============  =======================
-Method    WmiMethodId   Input (4-byte LE)
-========  ============  =======================
-ReadECReg     1         ``04 reg 00 00``
-WriteECReg    2         ``04 reg val 00`` (hypothesized)
-========  ============  =======================
+========  ============  ==========================================
+Method    WmiMethodId   Input (32-byte Buffer, first 4 bytes LE)
+========  ============  ==========================================
+ReadECReg     1         ``04 reg 00 00`` + 28 zero bytes
+WriteECReg    2         ``04 reg val 00`` + 28 zero bytes (hypothesized)
+========  ============  ==========================================
 
 Output is an 8-byte block (ACPI buffer, hex string ``uStringReturn``, or a
 package of bytes / ``{ ReturnValue, string }``). Byte 0 is status

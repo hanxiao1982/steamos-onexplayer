@@ -61,8 +61,8 @@ extra=()
 if [[ "${OXP_WMI_FORCE:-0}" == 1 ]]; then
   extra+=(force=1)
 fi
-if [[ -n "${OXP_WMI_ARG2:-}" ]]; then
-  extra+=("arg2=${OXP_WMI_ARG2}")
+if [[ -n "${OXP_WMI_IN_LEN:-}" ]]; then
+  extra+=("in_len=${OXP_WMI_IN_LEN}")
 fi
 if ! insmod "${KO}" "${extra[@]+"${extra[@]}"}"; then
   echo "insmod failed. Common causes:" >&2
@@ -117,9 +117,9 @@ fi
 
 if [[ "${zeros}" -eq 1 ]]; then
   echo
-  echo "WARNING: temp1_input is 0. On a warm X2 Mini that means Arg2/parse is still wrong." >&2
-  echo "Check dmesg for 'ReadECReg integer' vs 'ReadECReg buffer' and last_info above." >&2
-  echo "Override: sudo insmod ${KO} arg2=1   # force ACPI Integer GroupOffset" >&2
+  echo "WARNING: temp1_input is 0. WMI succeeded but the EC payload is empty." >&2
+  echo "Check dmesg for 'ReadECReg in=32/8/4' and last_info (ACPI type + raw bytes)." >&2
+  echo "Override: sudo insmod ${KO} in_len=32   # MSI CreateByteField size" >&2
   exit 2
 fi
 
