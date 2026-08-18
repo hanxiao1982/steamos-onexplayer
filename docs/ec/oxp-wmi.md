@@ -78,7 +78,7 @@ sudo kmod/scripts/hwmon-pwm.sh --read
 sudo kmod/scripts/hwmon-pwm.sh --hold 8 80
 ```
 
-X2 Mini live: `pwm1_enable=1` and `pwm1≈101` read back immediately after a 40% write, so `WriteECReg` packing works. The fan RPM stayed 360 and `pwm1` fell back to 0 within 8s while still manual — something else is clearing `0x4B` (firmware or Bazzite `steamos-manager` / PowerStation). Retry after `systemctl stop steamos-manager.service`, or `hwmon-pwm.sh --refresh --hold 8 80`.
+X2 Mini live: `WriteECReg` packing works (`pwm1_enable` stays 1; `pwm1` readback is 203 after an 80% write). Stopping `steamos-manager` / PowerStation does **not** change that. Within ~1s `0x4B` reads back 0, and `fan1_input` stays 360 even in the instant when `pwm1` is 203. Firmware is either sampling/clearing duty on a 1 Hz loop, or `0x4B` is a mailbox that does not drive the motor until something else applies it. Next check: `hwmon-pwm.sh --burst --hold 8 100` (rewrite every 50ms, no mid-hold pwm reads).
 
 If `pwm1_enable` stays `2`, the write itself did not stick. The driver tries method 2/3 and a few UInt32 layouts; `dmesg` prints which packing read back.
 
