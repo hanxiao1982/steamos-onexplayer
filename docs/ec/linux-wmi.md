@@ -171,6 +171,17 @@ JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStri
 
 Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI **read** path are validated.
 
+### Linux probe (X2 Mini, Bazzite 7.2 OGC)
+
+`object_id=AC` → method `WMAC`. `wmidev_evaluate_method` with a **32-byte** input (first 4 bytes = LE `GroupOffset`) returns:
+
+```
+ACPI_TYPE_STRING len=39
+"0x00,0x28,0x00,0x00,0x00,0x00,0x00,0x00"
+```
+
+`0x28` = CPU temp **40 °C**. Same load: `fan1_input=360`, `pwm1_enable=2` (auto). A 4-byte input succeeds with every EC byte 0 — the MSI `CreateByteField` 32-byte size is required on this AML, not optional.
+
 `WriteECReg` / `WriteReadECReg` packing is not probed. Hypothesis (same LE layout, extra value byte):
 
 ```

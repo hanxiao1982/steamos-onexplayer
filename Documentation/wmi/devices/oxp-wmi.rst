@@ -27,9 +27,11 @@ ReadECReg     1         ``04 reg 00 00`` + 28 zero bytes
 WriteECReg    2         ``04 reg val 00`` + 28 zero bytes (hypothesized)
 ========  ============  ==========================================
 
-Output is an 8-byte block (ACPI buffer, hex string ``uStringReturn``, or a
-package of bytes / ``{ ReturnValue, string }``). Byte 0 is status
-(``0x00`` success, ``0xFF`` failure). Byte 1 is the EC value.
+On X2 Mini Linux the method returns an ACPI string
+``"0x00,0x28,0x00,0x00,0x00,0x00,0x00,0x00"`` (status + EC byte as
+``0xNN`` hex). Byte 0 is status (``0x00`` success, ``0xFF`` failure).
+Byte 1 is the EC value. The WMI object id is ``AC`` (ACPI method ``WMAC``).
+Input must be a 32-byte buffer; 4 bytes return success and value 0.
 
 Do not bind ``ABBC0F6E-8EA1-11D1-00A0-C90629100000`` (MSI / Microsoft sample).
 

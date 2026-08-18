@@ -53,9 +53,9 @@ DMI: `Manufacturer` or `Board Vendor` contains `ONE-NETBOOK`. Known AMD products
 
 ```
 dmesg | grep oxp-wmi
-# ReadECReg in=32: ret=0 CPU NN C (BUFFER len=8 00 31 ...)
+# ReadECReg in=32: ret=0 CPU 40 C (STRING len=39 "0x00,0x28,...")
 # using 32-byte WMI input buffer
-# OxpWMI ok, CPU temp NN C (in_len=32)
+# OxpWMI ok, CPU temp 40 C (in_len=32)
 
 ls /sys/class/hwmon/hwmon*/name
 cat /sys/class/hwmon/oxp_wmi/fan1_input
@@ -65,7 +65,11 @@ cat /sys/bus/wmi/devices/43B5A593-AD62-4257-8546-91B0797BEC1B*/power_supply_mode
 sudo cat /sys/kernel/debug/oxp-wmi-*/last_info
 ```
 
-If `temp1_input` is `0` but `dmesg` says `OxpWMI ok`, the WMI call succeeded and the payload is empty. Probe tries input lengths **32 (MSI), then 8, then 4**. Override with `insmod oxp-wmi.ko in_len=32`.
+X2 Mini live on Bazzite (kernel 7.2 OGC): `object_id=AC`, `in_len=32`, ACPI `STRING` `"0x00,0x28,…"`, `temp1_input=40000`, `fan1_input=360`, `pwm1_enable=2`. A 4-byte input returns status ok and every value 0.
+
+In auto (`pwm1_enable=2`) `pwm1` may read 0 while the fan still spins; duty `0x4B` is only meaningful after `pwm1_enable=1`.
+
+If `temp1_input` is `0` but `dmesg` says `OxpWMI ok` with no `in_len=`, you are still on the old `.ko`. Probe tries **32, then 8, then 4**. Override with `insmod oxp-wmi.ko in_len=32`.
 
 Manual fan 40%:
 

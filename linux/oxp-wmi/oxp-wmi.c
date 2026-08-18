@@ -15,9 +15,11 @@
  *   Input  first 4 bytes = LE UInt32
  *          read:  0x04 | (reg << 8)
  *          write: 0x04 | (reg << 8) | (val << 16)   (hypothesized)
- *   Output 8-byte block or hex string uStringReturn
+ *   Output ACPI STRING (X2 Mini Linux live):
+ *          "0x00,0x28,0x00,0x00,0x00,0x00,0x00,0x00"  (len 39)
  *          byte[0] = 0x00 ok / 0xFF fail  (inverted vs MSI)
  *          byte[1] = EC RAM value
+ *   object_id AC → ACPI method WMAC. in_len=32 is required.
  *
  * Do not bind the MSI GUID. Not for AMD / WinRing0 boards.
  *
