@@ -2,12 +2,9 @@
 
 SteamOS / Linux bring-up notes for OneXPlayer handhelds.
 
-Out-of-tree research tree, not a SteamOS product. Unsigned local `.ko` files
-need matching kernel headers and Secure Boot off.
-
-**Live on X2 Mini Bazzite:** `oxp-wmi` fan PWM (WMAC Integer Arg2). Manual
-~60% held ~4400 RPM; `pwm1_enable=2` returned to auto. Charge sysfs, TDP,
-AMD `oxpec` DMI, and other SKUs are not validated the same way.
+**This repository is for research only.** Nothing here has been validated for
+real-world use. Do not install the kernel modules, scripts, or other artifacts
+on a device you care about. Production use is not recommended at this time.
 
 ## EC register maps
 
