@@ -2,6 +2,10 @@
 
 SteamOS / Linux bring-up notes for OneXPlayer handhelds.
 
+**This repository is for research only.** Nothing here has been validated for
+real-world use. Do not install the kernel modules, scripts, or other artifacts
+on a device you care about. Production use is not recommended at this time.
+
 ## EC register maps
 
 From OneXConsole 0.10.2-fix8. Installer and unpacked binaries are not in this repo.
