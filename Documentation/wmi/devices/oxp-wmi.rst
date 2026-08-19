@@ -8,9 +8,10 @@ OneXPlayer Intel handhelds that use OxpWMI (``SuRwECRegInterface``) expose
 EC RAM through ACPI-WMI, not through the ACPI Embedded Controller address
 space that ``oxpec`` uses on AMD boards.
 
-This driver is the Linux client for that interface. The call pattern matches
-``msi-wmi-platform`` (``wmidev_evaluate_method`` + a driver mutex). The GUID
-and method table do not.
+This driver is the Linux client for that interface. It uses a driver mutex
+like ``msi-wmi-platform``, but calls ACPI method ``WMAC`` with Integer Arg2
+(Windows CIM). ``wmidev_evaluate_method`` Buffer Arg2 is fallback only.
+The GUID and method table are not MSI's.
 
 WMI interface
 =============
@@ -18,15 +19,19 @@ WMI interface
 GUID ``43B5A593-AD62-4257-8546-91B0797BEC1B``
 Windows class ``SuRwECRegInterface`` (``root\\WMI``)
 
-========  ============  =======================
-Method    WmiMethodId   Input (4-byte LE)
-========  ============  =======================
-ReadECReg     1         ``04 reg 00 00``
-WriteECReg    2         ``04 reg val 00`` (hypothesized)
-========  ============  =======================
+========  ============  ==========================================
+Method    WmiMethodId   Input (ACPI Integer / UInt32)
+========  ============  ==========================================
+ReadECReg     1         ``0x04 | (reg << 8)``
+WriteECReg    2         ``0x04 | (reg << 8) | (val << 16)``
+========  ============  ==========================================
 
-Output is an 8-byte block (ACPI buffer or a hex string). Byte 0 is status
+WriteECReg (method 2) is the apply. WriteReadECReg (method 3) is not
+required. Output is STRING ``"0x00,0xNN,..."``. Byte 0 is status
 (``0x00`` success, ``0xFF`` failure). Byte 1 is the EC value.
+
+Entering manual PWM (``pwm1_enable=1``) writes ``0x4A=1`` then rewrites
+``0x4B`` so leftover duty latches.
 
 Do not bind ``ABBC0F6E-8EA1-11D1-00A0-C90629100000`` (MSI / Microsoft sample).
 

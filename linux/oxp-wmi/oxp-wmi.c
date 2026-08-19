@@ -2,19 +2,17 @@
 /*
  * OneXPlayer OxpWMI (SuRwECRegInterface) — Intel / ecAccessType=2.
  *
- * Call pattern copied from msi-wmi-platform: wmi_driver + mutex around
- * wmidev_evaluate_method() + hwmon + debugfs. The ABI is not MSI's:
+ * Windows OneXConsole / CIM (X2 Mini live):
  *
- *   GUID   43B5A593-AD62-4257-8546-91B0797BEC1B
- *   Read   WmiMethodId 1  ReadECReg(GroupOffset)
- *   Write  WmiMethodId 2  WriteECReg(GroupOffsetValue)
- *   Input  4-byte little-endian UInt32
- *          read:  [0x04] [reg] [0x00] [0x00]
- *          write: [0x04] [reg] [val]  [0x00]   (hypothesized; see docs)
- *   Output byte[0] = 0x00 ok / 0xFF fail (opposite of msi-wmi-platform)
- *          byte[1] = EC RAM value
+ *   Invoke-CimMethod SuRwECRegInterface ReadECReg/WriteECReg
+ *   Arg2 is ACPI Integer (UInt32), not a Buffer / Package_32
+ *   Read   WmiMethodId 1  GroupOffset      = 0x04 | (reg << 8)
+ *   Write  WmiMethodId 2  GroupOffsetValue = 0x04 | (reg << 8) | (val << 16)
+ *                         bytes 04, reg, val, 00  (confirmed)
+ *   Output STRING "0x00,0xNN,..." ; byte0 0x00 ok (inverted vs MSI)
  *
- * Transport for OneXPlayer Intel handhelds that speak OxpWMI.
+ * Call WMAC with Integer Arg2. wmidev_evaluate_method() types Arg2 from
+ * _WDG (Buffer/String) and does not drive the fan on this firmware.
  * Do not bind the MSI GUID. Not for AMD / WinRing0 boards.
  *
  * Copyright (C) 2026
@@ -25,8 +23,10 @@
 #include <linux/acpi.h>
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
+#include <linux/device.h>
 #include <linux/dmi.h>
 #include <linux/hwmon.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -67,6 +67,19 @@ enum oxp_wmi_method {
 
 #define OXP_WMI_OUT_LEN		8
 
+/* 43B5A593-AD62-4257-8546-91B0797BEC1B in Windows/_WDG mixed-endian order. */
+static const u8 oxp_wmi_guid_bin[16] = {
+	0x93, 0xa5, 0xb5, 0x43, 0x62, 0xad, 0x57, 0x42,
+	0x85, 0x46, 0x91, 0xb0, 0x79, 0x7b, 0xec, 0x1b
+};
+
+struct oxp_wdg_block {
+	u8 guid[16];
+	u8 object_id[2];
+	u8 instance_count;
+	u8 flags;
+} __packed;
+
 static bool force;
 module_param_unsafe(force, bool, 0444);
 MODULE_PARM_DESC(force, "Load without DMI whitelist (debug)");
@@ -75,7 +88,10 @@ struct oxp_wmi_data {
 	struct wmi_device *wdev;
 	struct mutex wmi_lock;	/* firmware WMxx is not thread-safe */
 	struct dentry *debugfs;
+	acpi_handle acpi_handle;
+	char wm_method[5];
 	u8 last_out[OXP_WMI_OUT_LEN];
+	char last_desc[160];
 };
 
 /* GroupOffset / GroupOffsetValue packing (LE on the wire). */
@@ -108,7 +124,7 @@ static int oxp_wmi_parse_output(union acpi_object *obj, u8 *out)
 		if (!s)
 			return -EPROTO;
 
-		/* "00,01,40,00,00,00,00,00" or "0001400000000000" */
+		/* Live CIM: "0x00,0x28,..." — skip optional 0x, then two hex digits. */
 		while (*s && n < OXP_WMI_OUT_LEN) {
 			unsigned int v;
 			int got;
@@ -117,6 +133,8 @@ static int oxp_wmi_parse_output(union acpi_object *obj, u8 *out)
 				s++;
 			if (!*s)
 				break;
+			if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+				s += 2;
 			if (sscanf(s, "%2x%n", &v, &got) != 1)
 				return -EPROTO;
 			out[n++] = v;
@@ -143,45 +161,164 @@ static int oxp_wmi_parse_output(union acpi_object *obj, u8 *out)
 	}
 }
 
+static acpi_handle oxp_wmi_acpi_handle(struct wmi_device *wdev)
+{
+	struct device *dev;
+	struct acpi_device *adev;
+	int hop;
+
+	for (dev = &wdev->dev, hop = 0; dev && hop < 6; dev = dev->parent, hop++) {
+		if (ACPI_HANDLE(dev))
+			return ACPI_HANDLE(dev);
+		adev = ACPI_COMPANION(dev);
+		if (adev && adev->handle)
+			return adev->handle;
+	}
+	return NULL;
+}
+
+static int oxp_wmi_bind_wm(struct oxp_wmi_data *data, acpi_handle handle,
+			   const char *method)
+{
+	char name[5];
+	acpi_handle tmp;
+
+	if (!handle || !method || strlen(method) != 4)
+		return -EINVAL;
+	memcpy(name, method, 4);
+	name[4] = '\0';
+	if (ACPI_FAILURE(acpi_get_handle(handle, name, &tmp)))
+		return -ENOENT;
+	data->acpi_handle = handle;
+	memcpy(data->wm_method, name, sizeof(data->wm_method));
+	return 0;
+}
+
 /*
- * Same shape as msi_wmi_platform_query(): evaluate + parse + mutex.
+ * Resolve WMxx for this GUID. Do not require the METHOD flag: X2 Mini
+ * object_id=AC still exposes WMAC even when _WDG flags look wrong.
+ */
+static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
+{
+	struct acpi_buffer out = { ACPI_ALLOCATE_BUFFER, NULL };
+	const struct oxp_wdg_block *blocks;
+	union acpi_object *obj;
+	acpi_handle handle;
+	char wm[5];
+	u32 i, n;
+	int ret = -ENODEV;
+
+	handle = oxp_wmi_acpi_handle(data->wdev);
+	if (!handle)
+		return -ENODEV;
+
+	if (!ACPI_FAILURE(acpi_evaluate_object(handle, "_WDG", NULL, &out))) {
+		obj = out.pointer;
+		if (obj && obj->type == ACPI_TYPE_BUFFER && obj->buffer.pointer) {
+			blocks = (const struct oxp_wdg_block *)obj->buffer.pointer;
+			n = obj->buffer.length / sizeof(*blocks);
+			for (i = 0; i < n; i++) {
+				if (memcmp(blocks[i].guid, oxp_wmi_guid_bin, 16))
+					continue;
+				wm[0] = 'W';
+				wm[1] = 'M';
+				wm[2] = blocks[i].object_id[0];
+				wm[3] = blocks[i].object_id[1];
+				wm[4] = '\0';
+				dev_info(&data->wdev->dev,
+					 "GUID object_id=%c%c flags=0x%02x\n",
+					 wm[2], wm[3], blocks[i].flags);
+				if (!oxp_wmi_bind_wm(data, handle, wm)) {
+					ret = 0;
+					break;
+				}
+			}
+		}
+		kfree(obj);
+	}
+
+	if (ret && !oxp_wmi_bind_wm(data, handle, "WMAC"))
+		ret = 0;
+	return ret;
+}
+
+/*
+ * Windows CIM passes Arg2 as ACPI Integer. wmidev_evaluate_method() types
+ * Arg2 from _WDG (Buffer/String) and does not drive the fan on this firmware.
  * Status polarity is inverted vs MSI: 0x00 is success here.
  */
 static int oxp_wmi_query(struct oxp_wmi_data *data, u32 method, u32 in_val,
 			 u8 *out)
 {
 	struct acpi_buffer acpi_out = { ACPI_ALLOCATE_BUFFER, NULL };
-	__le32 in_le = cpu_to_le32(in_val);
-	struct acpi_buffer acpi_in = {
-		.length = sizeof(in_le),
-		.pointer = &in_le,
-	};
 	union acpi_object *obj;
 	acpi_status status;
+	bool used_int = false;
 	int ret;
 
 	mutex_lock(&data->wmi_lock);
-	status = wmidev_evaluate_method(data->wdev, 0, method, &acpi_in,
-					&acpi_out);
+	if (data->acpi_handle && data->wm_method[0]) {
+		union acpi_object params[3];
+		struct acpi_object_list arglist = {
+			.count = 3,
+			.pointer = params,
+		};
+
+		params[0].type = ACPI_TYPE_INTEGER;
+		params[0].integer.value = 0;
+		params[1].type = ACPI_TYPE_INTEGER;
+		params[1].integer.value = method;
+		/* Integer value is the UInt32 as-is, not cpu_to_le32(). */
+		params[2].type = ACPI_TYPE_INTEGER;
+		params[2].integer.value = in_val;
+		used_int = true;
+		status = acpi_evaluate_object(data->acpi_handle, data->wm_method,
+					      &arglist, &acpi_out);
+	} else {
+		__le32 in_le = cpu_to_le32(in_val);
+		struct acpi_buffer acpi_in = {
+			.length = sizeof(in_le),
+			.pointer = &in_le,
+		};
+
+		status = wmidev_evaluate_method(data->wdev, 0, method, &acpi_in,
+						&acpi_out);
+	}
 	mutex_unlock(&data->wmi_lock);
 
-	if (ACPI_FAILURE(status))
+	if (ACPI_FAILURE(status)) {
+		scnprintf(data->last_desc, sizeof(data->last_desc),
+			  "wm=%s arg2=%s method=%u in=0x%08x acpi=0x%x",
+			  data->wm_method[0] ? data->wm_method : "wmidev",
+			  used_int ? "integer" : "buffer", method, in_val,
+			  status);
 		return -EIO;
+	}
 
 	obj = acpi_out.pointer;
-	if (!obj)
+	if (!obj) {
+		scnprintf(data->last_desc, sizeof(data->last_desc),
+			  "wm=%s arg2=%s method=%u in=0x%08x empty",
+			  data->wm_method[0] ? data->wm_method : "wmidev",
+			  used_int ? "integer" : "buffer", method, in_val);
 		return -ENODATA;
+	}
 
 	ret = oxp_wmi_parse_output(obj, out);
 	kfree(obj);
+	if (!ret)
+		memcpy(data->last_out, out, OXP_WMI_OUT_LEN);
+
+	scnprintf(data->last_desc, sizeof(data->last_desc),
+		  "wm=%s arg2=%s method=%u in=0x%08x parse=%d out=%02x %02x",
+		  data->wm_method[0] ? data->wm_method : "wmidev",
+		  used_int ? "integer" : "buffer", method, in_val, ret,
+		  out[0], out[1]);
+
 	if (ret)
 		return ret;
-
-	memcpy(data->last_out, out, OXP_WMI_OUT_LEN);
-
 	if (out[0] != 0x00)
 		return -EIO;
-
 	return 0;
 }
 
@@ -204,6 +341,26 @@ static int oxp_wmi_write(struct oxp_wmi_data *data, u8 reg, u8 value)
 
 	return oxp_wmi_query(data, OXP_WMI_WRITE_EC,
 			     oxp_wmi_pack_write(reg, value), out);
+}
+
+/*
+ * Windows: 4A=1 does not apply leftover 4B. WriteECReg 0x4B again (even if
+ * readback already matches) is what latches the motor compare.
+ */
+static int oxp_wmi_set_pwm_manual(struct oxp_wmi_data *data)
+{
+	u8 duty;
+	int ret;
+
+	ret = oxp_wmi_write(data, OXP_REG_PWM_ENABLE, OXP_PWM_MANUAL);
+	if (ret)
+		return ret;
+	ret = oxp_wmi_read(data, OXP_REG_PWM_DUTY, &duty);
+	if (ret)
+		return ret;
+	if (duty > OXP_PWM_MAX)
+		duty = OXP_PWM_MAX;
+	return oxp_wmi_write(data, OXP_REG_PWM_DUTY, duty);
 }
 
 static int oxp_wmi_read_be16(struct oxp_wmi_data *data, u8 hi_reg, u16 *val)
@@ -308,8 +465,7 @@ static int oxp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 			return oxp_wmi_write(data, OXP_REG_PWM_ENABLE,
 					     OXP_PWM_AUTO);
 		if (val == 1)
-			return oxp_wmi_write(data, OXP_REG_PWM_ENABLE,
-					     OXP_PWM_MANUAL);
+			return oxp_wmi_set_pwm_manual(data);
 		if (val != 0)
 			return -EINVAL;
 		ret = oxp_wmi_write(data, OXP_REG_PWM_ENABLE, OXP_PWM_MANUAL);
@@ -536,6 +692,17 @@ static ssize_t oxp_dbg_last_out_read(struct file *file, char __user *ubuf,
 				       OXP_WMI_OUT_LEN);
 }
 
+static ssize_t oxp_dbg_last_info_read(struct file *file, char __user *ubuf,
+				      size_t len, loff_t *off)
+{
+	struct oxp_wmi_data *data = file->private_data;
+	char buf[192];
+	int n;
+
+	n = scnprintf(buf, sizeof(buf), "%s\n", data->last_desc);
+	return simple_read_from_buffer(ubuf, len, off, buf, n);
+}
+
 static const struct file_operations oxp_dbg_read_ec_fops = {
 	.owner	= THIS_MODULE,
 	.open	= oxp_dbg_ec_open,
@@ -549,6 +716,13 @@ static const struct file_operations oxp_dbg_write_ec_fops = {
 	.open	= oxp_dbg_ec_open,
 	.write	= oxp_dbg_write_ec_write,
 	.read	= oxp_dbg_last_out_read,
+	.llseek	= default_llseek,
+};
+
+static const struct file_operations oxp_dbg_last_info_fops = {
+	.owner	= THIS_MODULE,
+	.open	= oxp_dbg_ec_open,
+	.read	= oxp_dbg_last_info_read,
 	.llseek	= default_llseek,
 };
 
@@ -575,6 +749,7 @@ static void oxp_wmi_debugfs_init(struct oxp_wmi_data *data)
 	data->debugfs = dir;
 	debugfs_create_file("read_ec", 0600, dir, data, &oxp_dbg_read_ec_fops);
 	debugfs_create_file("write_ec", 0600, dir, data, &oxp_dbg_write_ec_fops);
+	debugfs_create_file("last_info", 0400, dir, data, &oxp_dbg_last_info_fops);
 }
 
 /* ---- probe ---- */
@@ -594,6 +769,14 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 	mutex_init(&data->wmi_lock);
 	dev_set_drvdata(&wdev->dev, data);
 
+	if (oxp_wmi_discover_wm(data)) {
+		dev_warn(&wdev->dev,
+			 "WMAC not found; falling back to wmidev Buffer Arg2\n");
+	} else {
+		dev_info(&wdev->dev, "calling %s with Integer Arg2\n",
+			 data->wm_method);
+	}
+
 	ret = oxp_wmi_read(data, OXP_REG_CPU_TEMP, &temp);
 	if (ret) {
 		dev_err(&wdev->dev,
@@ -603,7 +786,10 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 			return ret;
 		dev_warn(&wdev->dev, "Continuing because force=1\n");
 	} else {
-		dev_info(&wdev->dev, "OxpWMI ok, CPU temp %u C\n", temp);
+		dev_info(&wdev->dev,
+			 "OxpWMI ok, %s %s Arg2, CPU temp %u C\n",
+			 data->wm_method[0] ? data->wm_method : "wmidev",
+			 data->wm_method[0] ? "Integer" : "Buffer", temp);
 	}
 
 	oxp_wmi_debugfs_init(data);
@@ -696,4 +882,5 @@ module_exit(oxp_wmi_exit);
 MODULE_AUTHOR("steamos-onexplayer");
 MODULE_DESCRIPTION("OneXPlayer OxpWMI EC access (Intel)");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("0.7");
 MODULE_ALIAS("wmi:" OXP_WMI_GUID);
