@@ -1,8 +1,8 @@
-# OneXConsole EC access vs Linux oxpec
+# OneXConsole EC access vs Linux oxpec / oxp-wmi
 
-Source: OneXConsole **0.10.2-fix8** (`CompatLayerCT.exe`, `background.js`, `WinRing0x64.dll`) compared with upstream `drivers/platform/x86/oxpec.c`.
+Source: OneXConsole **0.10.2-fix8** (`CompatLayerCT.exe`, `background.js`, `WinRing0x64.dll`) compared with upstream `oxpec` (AMD ACPI EC) and this repo’s [`oxp-wmi`](oxp-wmi.md) (Intel WMI).
 
-Register offsets are in [README.md](README.md). This page is only **how** bytes are read and written.
+Register offsets: [x2-mini.md](x2-mini.md) / [x2-mini-pro.md](x2-mini-pro.md). This page is only **how** bytes are read and written.
 
 ## Two backends
 
@@ -86,7 +86,7 @@ WMI, not port I/O.
 | Write+read | `WriteReadECReg` (`WmiMethodId=3`), same in-param as write; MOF: write one, return several regs |
 | Out | `uStringReturn` (8 bytes); CIM also adds `ReturnValue` |
 
-`GroupOffset` is `UInt32`. On the wire it is little-endian; firmware uses **byte0 = group, byte1 = offset**. CompatLayerCT’s JS `0x400+reg` must be byteswapped before the WMI call (`0x458` → `0x5804`).
+`GroupOffset` is `UInt32`. Firmware uses **byte0 = group, byte1 = offset**: `0x04 | (reg << 8)` (`0x58` → `0x5804`). CompatLayerCT’s JS `0x400+reg` (`0x458`) is rejected.
 
 `uStringReturn` is 8 bytes (OneXConsole also accepts `^[0-9A-F]{16}$`):
 
@@ -114,7 +114,7 @@ acpi_release_global_lock();
 
 `ec_read` / `ec_write` are the in-kernel ACPI EC driver (`drivers/acpi/ec.c`). They use the same 0x66/0x62 handshake as WinRing0, plus the **ACPI global lock**, and they accept **8-bit** addresses only.
 
-There is **no** `SuRwECRegInterface` client in `oxpec`. If a G3E firmware hides Embedded Control from ACPI and only exposes WMI, `oxpec` cannot talk to that EC until a WMI backend exists.
+There is **no** `SuRwECRegInterface` client in `oxpec`. Intel G3E uses the out-of-tree [`oxp-wmi`](oxp-wmi.md) driver (`linux/oxp-wmi/`).
 
 The kernel *does* already have a G3E handheld that speaks EC-over-WMI: MSI Claw 8 EX AI+ via `msi-wmi-platform`. Same idea (mutex + evaluate on `PNP0C14`), different class/GUID/method ABI and Arg2 type than `SuRwECRegInterface` (OxpWMI needs Integer Arg2 on `WMAC`). File map and comparison: [linux-wmi.md](linux-wmi.md).
 
@@ -130,7 +130,7 @@ Userspace on Linux (not used by `oxpec`):
 |---|---|---|---|
 | Transport | Ring-0 port I/O | WMI `SuRwECRegInterface` | ACPI EC (`ec_read`/`ec_write`) |
 | Ports | 0x66 / 0x62 | none | 0x66 / 0x62 (inside ACPI EC) |
-| Address | 8-bit | 16-bit `GroupOffset` (`0x400+reg`) | 8-bit |
+| Address | 8-bit | UInt32 `0x04 \| (reg << 8)` (JS `0x400+reg` is rejected) | 8-bit |
 | Lock | process `ECLocker` | firmware WMI | ACPI global lock, 500 ms |
 | Read cache | `readCache` | not indicated | none |
 | Privilege | signed `.sys` | normal WMI | kernel module |
@@ -142,8 +142,8 @@ Userspace on Linux (not used by `oxpec`):
 
 **Access**
 
-- No WMI backend → Intel G3E may need ACPI EC to be present, or a new `SuRwECRegInterface` driver.
-- No `0x400` group encoding; Linux always uses the low 8 bits.
+- `oxpec` has no WMI backend. Intel G3E uses [`oxp-wmi`](oxp-wmi.md), not ACPI `ec_read`.
+- `oxpec` has no `0x400` group encoding; ACPI EC always uses the low 8 bits. OxpWMI packing is `0x04 | (reg << 8)`, not JS `0x400+reg`.
 
 **DMI**
 

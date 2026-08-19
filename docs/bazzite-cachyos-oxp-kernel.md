@@ -4,16 +4,16 @@ This document records where OXP-related kernel modules live in both distros, and
 
 ## Read this first
 
-Neither side maintains a standalone `oxp.ko` source tree. Fans / EC go through mainline `oxpec`; buttons / RGB / gamepad config go through mainline `hid-oxp`. Distros only:
+Neither side maintains a standalone `oxp.ko` source tree. AMD fans / EC go through mainline `oxpec`. Intel G3E (X2 Mini) fans / charge go through out-of-tree [`oxp-wmi`](ec/oxp-wmi.md), not `oxpec`. Buttons / RGB / gamepad config go through mainline `hid-oxp`. Distros only:
 
 1. Backport DMI entries or quirks that are newer than mainline
 2. Layer userspace on top for key mapping, TDP, and fan curves
 
-**When targeting only the latest versions of these two systems, HHD does not need to be changed.** Key mapping is InputPlumber only. TDP / fans are not in InputPlumber; they go through PowerStation + steamos-manager, plus kernel `oxpec` hwmon. See [section 4](#4-userspace-latest-images-do-not-need-hhd).
+**When targeting only the latest versions of these two systems, HHD does not need to be changed.** Key mapping is InputPlumber only. TDP / fans are not in InputPlumber; they go through PowerStation + steamos-manager, plus kernel hwmon (`oxpec` on AMD, `oxp-wmi` on Intel G3E). See [section 4](#4-userspace-latest-images-do-not-need-hhd).
 
 | Function | Kernel module | Mainline source | Latest userspace (do not write HHD) |
 | --- | --- | --- | --- |
-| Fans, EC PWM, turbo takeover, charge limit | `oxpec` (formerly `oxp-sensors`) | `drivers/platform/x86/oxpec.c` | `oxpec` hwmon; Steam UI via steamos-manager `FanControl1` |
+| Fans, EC PWM, turbo takeover, charge limit | AMD: `oxpec`. Intel G3E: `oxp-wmi` | `oxpec`: `drivers/platform/x86/oxpec.c`. `oxp-wmi`: this repo `linux/oxp-wmi/` | hwmon (`oxpec` or `oxp_wmi`); Steam UI via steamos-manager `FanControl1` |
 | RGB, gamepad mode, hardware key mapping | `hid-oxp` | `drivers/hid/hid-oxp.c` | InputPlumber + optional `hid-oxp` sysfs |
 | TDP | Generally not in `oxpec` | AMD: `amd_pstate` / SMU; some models `acpi_call` | PowerStation + steamos-manager `TdpLimit1` |
 | Gamepad / shortcut mapping | `hid-oxp` + evdev | Same as above | InputPlumber `50-onexplayer_*.yaml` |
@@ -383,7 +383,7 @@ CachyOS also needs the new `product_name` in chwd `hwd_product_name_pattern`, or
 
 PowerStation is mainly generic AMD/Intel sysfs, not HHD-style per-model EC tables. New-machine TDP often needs no new YAML if SMU / `amd_pstate` can write; if Steam slider ranges are wrong, check PowerStation DMI platform overrides or steamos-manager device/remote config.
 
-Fan curves: first make sure `oxpec` recognizes the DMI and `pwm1` appears. Steam UI fans need steamos-manager implementing `FanControl1` (local or `remotes.d` remote). That is not InputPlumber's job.
+Fan curves: first make sure hwmon is up (`oxpec` on AMD, `oxp_wmi` on Intel G3E) and `pwm1` appears. Steam UI fans need steamos-manager implementing `FanControl1` (local or `remotes.d` remote). That is not InputPlumber's job.
 
 Many Intel OXP units never had a reliable Linux TDP interface; HHD also marked them `w/o TDP`. Changing stacks does not magically add one.
 
@@ -416,7 +416,7 @@ Do these in dependency order so you do not change only one side.
    - Vendor HID models: `src/drivers/oxp_hid/`
    - CachyOS: add `product_name` to the regex in chwd `handhelds/profiles.toml`
 6. **TDP / fans (not InputPlumber)**
-   - Fans: get `oxpec` hwmon first; then confirm steamos-manager `FanControl1`
+   - Fans: get hwmon first (`oxpec` or `oxp_wmi`); then confirm steamos-manager `FanControl1`
    - TDP: PowerStation + steamos-manager; on AMD confirm SMU is writable. Most Intel still have no TDP
 
 ---

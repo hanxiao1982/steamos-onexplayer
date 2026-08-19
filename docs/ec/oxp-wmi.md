@@ -8,6 +8,8 @@ OxpWMI is the Intel path (`ecAccessType=2`). AMD / WinRing0 boards stay on `oxpe
 
 Register map (current OneXConsole Intel table): [x2-mini.md](x2-mini.md). Protocol: [linux-wmi.md](linux-wmi.md), [access.md](access.md). Per-SKU offsets can be added later; the WMI transport stays the same.
 
+**X2 Mini Bazzite live:** WMAC Integer Arg2. `pwm1=153` (~60%) held ~4400 RPM; auto restore dropped RPM. Charge sysfs is present, not soak-tested.
+
 ## What it controls
 
 | Sysfs | EC | Notes |

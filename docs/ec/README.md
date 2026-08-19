@@ -30,7 +30,7 @@ Short version:
 3. Backends:
    - **1 = WinRing0** (AMD): `ReadIoPortByte` / `WriteIoPortByte` on 0x66/0x62
    - **2 = OxpWMI** (Intel G3E): WMI `SuRwECRegInterface` (`ReadECReg` / `WriteECReg`)
-4. App addresses are `0x400 + ec_reg`. WinRing0 uses the low 8 bits; WMI uses the full 16-bit `GroupOffset`.
+4. App addresses are `0x400 + ec_reg`. WinRing0 uses the low 8 bits. OxpWMI CIM/Linux packing is `0x04 | (reg << 8)` (JS `0x400+reg` is rejected).
 
 Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `oxpec`.
 
@@ -45,5 +45,5 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [../../linux/oxp-wmi/](../../linux/oxp-wmi/) — driver sources
 - [maps.yaml](maps.yaml) — machine-readable tables
 - [charge.md](charge.md) — charge-limit / bypass / force-min ranges and read-only probe
-- [fan.md](fan.md) — fan PWM / RPM read-only probe (X2 Mini)
+- [fan.md](fan.md) — fan PWM / RPM (X2 Mini; Linux `oxp-wmi` writes live)
 - [ui-vs-ec.md](ui-vs-ec.md) — which OneXConsole controls are EC vs MSR/HID

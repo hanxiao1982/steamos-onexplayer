@@ -22,7 +22,7 @@ if [[ "$STACK" == oxp-wmi ]]; then
   echo
   echo "Optional persist via DKMS (rebuilds after kernel updates):"
   echo "  sudo dkms add ${ROOT}/linux/oxp-wmi"
-  echo "  sudo dkms install oxp-wmi/0.1.0"
+  echo "  sudo dkms install oxp-wmi/0.7"
   exit 0
 fi
 

@@ -13,6 +13,7 @@
  *
  * Call WMAC with Integer Arg2. wmidev_evaluate_method() types Arg2 from
  * _WDG (Buffer/String) and does not drive the fan on this firmware.
+ * X2 Mini Bazzite live: manual ~60% held ~4400 RPM; auto restored.
  * Do not bind the MSI GUID. Not for AMD / WinRing0 boards.
  *
  * Copyright (C) 2026
@@ -42,9 +43,8 @@
 #define OXP_WMI_GROUP		0x04
 
 enum oxp_wmi_method {
-	OXP_WMI_READ_EC		= 1,
-	OXP_WMI_WRITE_EC	= 2,
-	OXP_WMI_WRITE_READ_EC	= 3,
+	OXP_WMI_READ_EC		= 1,	/* ReadECReg */
+	OXP_WMI_WRITE_EC	= 2,	/* WriteECReg — apply. MOF also has 3. */
 };
 
 /* Default OxpWMI register set from the current OneXConsole Intel table */

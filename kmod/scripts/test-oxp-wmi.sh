@@ -90,4 +90,15 @@ if [[ "${found}" -eq 0 ]]; then
 fi
 
 echo
+echo "== debugfs last_info =="
+shopt -s nullglob
+infos=(/sys/kernel/debug/oxp-wmi-*/last_info)
+shopt -u nullglob
+if [[ ${#infos[@]} -eq 0 ]]; then
+  echo "(no /sys/kernel/debug/oxp-wmi-*/last_info — is debugfs mounted?)"
+else
+  cat "${infos[0]}"
+fi
+
+echo
 echo "oxp-wmi probe OK"
