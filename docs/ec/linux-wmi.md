@@ -82,7 +82,7 @@ out[1…] = payload
 | `0x51` | PL2 / SPPT (LE32 watts) |
 | `0xd7` | Charge end threshold (0–100) |
 
-Kernel call site (the piece to copy, not the MSI GUID):
+Kernel call site (the mutex + evaluate *shape* to copy, not the MSI methods or Buffer Arg2):
 
 ```c
 status = wmidev_evaluate_method(data->wdev, 0x0, method, &in, &out);
@@ -103,7 +103,7 @@ Not the same ABI. Do **not** bind `msi-wmi-platform` to a OneXPlayer DMI id.
 | GUID | `43B5A593-AD62-4257-8546-91B0797BEC1B` (X2 Mini Windows `guid` qualifier) | `ABBC0F6E-8EA1-11D1-00A0-C90629100000` |
 | Read | `ReadECReg(GroupOffset)` | `Get_Data` / `Get_Fan` / … |
 | Write | `WriteECReg(GroupOffsetValue)` | `Set_Data` / `Set_Fan` / … |
-| Address | UInt32 LE `04 reg 00 00` (JS still writes `0x400+reg`) | 8-bit `buffer[0]` (or fan subfeature) |
+| Address | UInt32 LE `04 reg 00 00`; write `04 reg val 00` (Integer Arg2) | 8-bit `buffer[0]` (or fan subfeature) |
 | Payload | hex string / 8-byte block in out-params | fixed 32-byte ACPI buffer |
 | Fan | EC `0x58`/`0x59` (BE16 RPM) | `Get_Fan` raw, `480000/raw` |
 | TDP | EC gate `0xED` + Intel MSR | WMI `0x50`/`0x51` watts |
@@ -158,22 +158,25 @@ JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStri
 
 Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI **read** path are validated.
 
-`WriteECReg` / `WriteReadECReg` packing is not probed. Hypothesis (same LE layout, extra value byte):
+`WriteECReg` packing (X2 Mini CIM, confirmed). Arg2 is ACPI **Integer** (`UInt32`), not a Buffer:
 
 ```
 GroupOffsetValue = 0x04 | (reg << 8) | (value << 16)
 # bytes: 04, reg, value, 00
+# 0x4A=1 → 0x00014A04; 0x4B=184 → 0x00B84B04
 ```
 
-Do not write until that is confirmed. Method 3 may fill more of the 8-byte return (consecutive regs). `WmiMethodId` for Linux is **1 / 2 / 3**.
+JS `0x400+reg` is rejected. Method **2 is the apply**; method 3 (`WriteReadECReg`) echoes the written byte but is not required. `WriteECReg` may return all zeros on success.
+
+Fan apply: `0x4A=1` then **WriteECReg `0x4B` again** even if readback already matches. In auto, `0x4B` is stale (not the live motor compare). `WmiMethodId` for Linux is **1 / 2 / 3**.
 
 ## What to reuse for an OxpWMI Linux backend
 
-Copy the **call pattern** from `msi-wmi-platform`, not the method table.
+Copy the **call pattern** from `msi-wmi-platform` (mutex + evaluate), not the method table or Buffer Arg2.
 
 1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
-2. `wmidev_evaluate_method(wdev, 0, method_id, in, out)` with a driver mutex. Method IDs: `ReadECReg=1`, `WriteECReg=2`, `WriteReadECReg=3`.
-3. Input is a 4-byte little-endian `UInt32`: read `04, reg, 0, 0`; write likely `04, reg, value, 0`. Parse output byte[0] as status, byte[1] as the register. Do **not** pass JS `0x400+reg` as the UInt32.
+2. Prefer `acpi_evaluate_object(handle, "WMAC", …)` with Integer Arg2 (instance 0, method id, `GroupOffset` / `GroupOffsetValue` as UInt32). `wmidev_evaluate_method()` types Arg2 from `_WDG` (Buffer/String) and does **not** drive the fan on this firmware; keep it only if WMAC is missing. Method IDs: `ReadECReg=1`, `WriteECReg=2` (apply). Do not use method 3 as apply.
+3. Integer packing: read `0x04 | (reg << 8)`; write `| (value << 16)`. Bytes `04, reg, [value,] 00`. Parse output byte[0] as status, byte[1] as the register (STRING may be `"0x00,0xNN,…"`). Do **not** pass JS `0x400+reg`. After `0x4A=1`, rewrite `0x4B` to latch PWM.
 4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, PWM 0–184, charge `0xA3`/`0xA4`). Skip `0xEB` / `0xA5` on X2 Mini (live unused).
 5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
 
@@ -284,4 +287,4 @@ The object that is both a method GUID and AML that hits the EC / `0x400` is OxpW
 
 The GUID is only `wmi_device_id`. You also need **`WmiMethodId`** from MOF / Windows method qualifiers (`ReadECReg` / `WriteECReg` each have an integer), and whether the input is a 16-bit `GroupOffset` or a buffer. Garbled `bmfdec` output does not have that; use `CimClassMethods` in section 1 or `[WmiMethodId(n)]` after `bmf2mof` in section 0.
 
-GUID, method IDs (1/2/3), `GroupOffset` packing, and `uStringReturn` layout are known on X2 Mini. `WriteECReg` / `WriteReadECReg` value packing is still a hypothesis. `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.
+GUID, method IDs (1/2/3), Integer Arg2, `GroupOffset` / `GroupOffsetValue` packing, and `uStringReturn` layout are confirmed on X2 Mini. `WriteECReg` (method 2) applies; method 3 is not required. `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.

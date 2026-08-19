@@ -28,7 +28,7 @@ percent ≈ round(4B * 100 / 184)     # what OneXConsole shows
 4B      ≈ round(percent * 184 / 100) # what to write for a target %
 ```
 
-Examples: UI 20% → 37, 50% → 92, 100% → 184.
+Examples: UI 20% → 37, 50% → 92, 100% → 184. After `0x4A=1`, **rewrite `0x4B`** even if the duty byte already matches — leftover `0x4B` from auto does not latch until `WriteECReg` runs again.
 
 ```powershell
 # X2 Mini / Intel G3E — admin PowerShell, read only
