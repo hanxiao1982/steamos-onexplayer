@@ -4,7 +4,7 @@ OneXConsole talks to Intel Arc G3 Extreme ECs through WMI (`SuRwECRegInterface`)
 
 The closest in-tree handheld that also ships Intel G3E is **MSI Claw 8 EX AI+**. Its EC/fan/TDP/charge path is `msi-wmi-platform`, not `oxpec` and not HID.
 
-This page is a file map plus a protocol comparison. Register offsets for OneXPlayer stay in [README.md](README.md). OneXConsole backends stay in [access.md](access.md).
+This page is a file map plus a protocol comparison. Register offsets: [x2-mini.md](x2-mini.md). Linux client: [oxp-wmi.md](oxp-wmi.md). OneXConsole backends: [access.md](access.md).
 
 ## Kernel files (WMI stack)
 
@@ -156,7 +156,7 @@ JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStri
 | `0x60` | `0x6004` | `0x2A` | board sensor **42 °C** |
 | `0xA0` | `0xA004` | `0x00` | battery temp; **ignore** (always 0 on X2 Mini) |
 
-Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. The G3E map and OxpWMI **read** path are validated.
+Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. Reads are validated on Windows. Writes (same Integer packing) are validated on Windows CIM and on Linux `oxp-wmi` (X2 Mini Bazzite: manual ~60% ≈ 4400 RPM).
 
 `WriteECReg` packing (X2 Mini CIM, confirmed). Arg2 is ACPI **Integer** (`UInt32`), not a Buffer:
 
@@ -168,17 +168,17 @@ GroupOffsetValue = 0x04 | (reg << 8) | (value << 16)
 
 JS `0x400+reg` is rejected. Method **2 is the apply**; method 3 (`WriteReadECReg`) echoes the written byte but is not required. `WriteECReg` may return all zeros on success.
 
-Fan apply: `0x4A=1` then **WriteECReg `0x4B` again** even if readback already matches. In auto, `0x4B` is stale (not the live motor compare). `WmiMethodId` for Linux is **1 / 2 / 3**.
+Fan apply: `0x4A=1` then **WriteECReg `0x4B` again** even if readback already matches. In auto, `0x4B` is stale (not the live motor compare). MOF has methods 1/2/3; Linux `oxp-wmi` uses 1 and 2.
 
-## What to reuse for an OxpWMI Linux backend
+## Linux oxp-wmi
 
-Copy the **call pattern** from `msi-wmi-platform` (mutex + evaluate), not the method table or Buffer Arg2.
+The client is [`oxp-wmi`](oxp-wmi.md) (`linux/oxp-wmi/`). It copies the **mutex + evaluate** shape from `msi-wmi-platform`, not the method table or Buffer Arg2.
 
-1. `struct wmi_driver` + `wmi_device_id` GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
-2. Prefer `acpi_evaluate_object(handle, "WMAC", …)` with Integer Arg2 (instance 0, method id, `GroupOffset` / `GroupOffsetValue` as UInt32). `wmidev_evaluate_method()` types Arg2 from `_WDG` (Buffer/String) and does **not** drive the fan on this firmware; keep it only if WMAC is missing. Method IDs: `ReadECReg=1`, `WriteECReg=2` (apply). Do not use method 3 as apply.
-3. Integer packing: read `0x04 | (reg << 8)`; write `| (value << 16)`. Bytes `04, reg, [value,] 00`. Parse output byte[0] as status, byte[1] as the register (STRING may be `"0x00,0xNN,…"`). Do **not** pass JS `0x400+reg`. After `0x4A=1`, rewrite `0x4B` to latch PWM.
-4. Keep the Intel G3E register map from [x2-mini.md](x2-mini.md) (`0x58` fan, PWM 0–184, charge `0xA3`/`0xA4`). Skip `0xEB` / `0xA5` on X2 Mini (live unused).
-5. Leave `oxpec`’s `ec_read`/`ec_write` path for AMD (WinRing0-equivalent).
+1. `struct wmi_driver` + GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
+2. `acpi_evaluate_object(handle, "WMAC", …)` with Integer Arg2. `wmidev_evaluate_method()` Buffer Arg2 does **not** drive the fan here; fallback only if WMAC is missing. Apply is `WriteECReg=2`. Do not use method 3 as apply.
+3. Integer packing: read `0x04 | (reg << 8)`; write `| (value << 16)`. Parse STRING `"0x00,0xNN,…"`. After `0x4A=1`, rewrite `0x4B` to latch PWM.
+4. Register map from [x2-mini.md](x2-mini.md). Skip `0xEB` / `0xA5` on X2 Mini.
+5. Leave `oxpec` `ec_read`/`ec_write` for AMD.
 
 `hid-msi` / `hid-msi-claw` is the wrong template for fans and charge. OneXConsole already treats RGB/rumble/gyro as HID (`CommonHid`), same split as Claw.
 
@@ -265,7 +265,7 @@ Each `PNP0C14` `_WDG` entry is 20 bytes:
 | 18 | instance count |
 | 19 | flags: `0x02` = has WMI method |
 
-Keep only `flags & 0x02`. Object id `XX` maps to ACPI method **`WMXX`** on the same device (`BA` → `WMBA`).
+Keep `flags & 0x02` as the usual filter. Object id `XX` maps to ACPI method **`WMXX`** (`BA` → `WMBA`). X2 Mini live: `object_id=AC` → `WMAC`; bind that method even if `_WDG` flags look wrong (the driver does not require the METHOD bit).
 
 Disassemble each `WMxx`. **That** is the “is this the EC?” test:
 
@@ -283,8 +283,6 @@ The object that is both a method GUID and AML that hits the EC / `0x400` is OxpW
 - GUID happens to be `ABBC0F6E-8EA1-11D1-00A0-C90629100000` (MSI / Microsoft sample). Confirm with class name or AML on OneXPlayer; do not treat it as Claw `Get_Data`
 - `oxpec` `ec_read` works: that only means ACPI EC is also present. It does **not** replace the WMI GUID. OneXConsole still uses WMI on Intel OxpWMI SKUs
 
-### 4. What is still needed to bind a driver
+### 4. Driver bind (done on X2 Mini)
 
-The GUID is only `wmi_device_id`. You also need **`WmiMethodId`** from MOF / Windows method qualifiers (`ReadECReg` / `WriteECReg` each have an integer), and whether the input is a 16-bit `GroupOffset` or a buffer. Garbled `bmfdec` output does not have that; use `CimClassMethods` in section 1 or `[WmiMethodId(n)]` after `bmf2mof` in section 0.
-
-GUID, method IDs (1/2/3), Integer Arg2, `GroupOffset` / `GroupOffsetValue` packing, and `uStringReturn` layout are confirmed on X2 Mini. `WriteECReg` (method 2) applies; method 3 is not required. `oxpec`’s `ec_read` remains a separate check: if ACPI EC exists, the low 8 bits may work without WMI.
+GUID, method IDs, Integer Arg2, packing, and `uStringReturn` are confirmed. Linux [`oxp-wmi`](oxp-wmi.md) binds `43B5A593-…` and calls `WMAC`. Fan PWM is live on Bazzite. Charge sysfs is wired the same way but not soak-tested. `oxpec` `ec_read` is a separate AMD / fallback path.

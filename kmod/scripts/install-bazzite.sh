@@ -23,7 +23,8 @@ Try, in order:
      then:  rpm-ostree install /path/to/kernel-devel-${KREL}.rpm
      reboot, and re-run this script.
   3) Or build the .ko on another Fedora machine with that same
-     kernel-devel, copy oxpec.ko here, and run install-common.sh
+     kernel-devel, copy the .ko here (oxp-wmi.ko or oxpec.ko), and run
+     install-oxp-wmi.sh or install-common.sh
 
 Do not layer stock Fedora kernel-devel; the OGC vermagic will not match.
 EOF

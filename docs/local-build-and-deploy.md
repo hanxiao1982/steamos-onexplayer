@@ -175,34 +175,34 @@ sudo kmod/scripts/install-bazzite.sh
 Without loading (normal user):
 
 ```bash
-kmod/scripts/test-oxpec.sh
+kmod/scripts/test-oxp-wmi.sh    # X2 Mini: DMI + WMI GUID + vermagic
+kmod/scripts/test-oxpec.sh      # AMD
 ```
 
 Load and probe hwmon (root):
 
 ```bash
+# X2 Mini / Intel G3E
+sudo kmod/scripts/test-oxp-wmi.sh linux/oxp-wmi/oxp-wmi.ko
+# AMD
 sudo kmod/scripts/test-oxpec.sh kmod/oxpec/oxpec.ko
 ```
 
-Success looks like:
+Success looks like `name=oxp_wmi` (X2 Mini) or `name=oxpec` (AMD).
 
-```
-found /sys/class/hwmon/hwmonN (name=oxpec)
-  fan1_input=....
-  pwm1=...
-  pwm1_enable=...
-```
-
-Manual fan smoke test (return to auto afterwards so it does not stay pegged):
+Manual fan smoke test (return to auto afterwards so it does not stay pegged). **Do not** copy an `oxpec`-only loop onto X2 Mini: an empty `$HWMON` writes `/pwm1` on ostree `/` (“Read-only file system”).
 
 ```bash
 HWMON=$(ls -d /sys/class/hwmon/hwmon* | while read d; do
-  [[ $(cat "$d/name") == oxpec ]] && echo "$d"
+  n=$(cat "$d/name")
+  [[ "$n" == oxp_wmi || "$n" == oxpec ]] && echo "$d"
 done)
+# abort if empty — otherwise the shell writes /pwm1
+[[ -n "$HWMON" ]]
 echo 1 > "$HWMON/pwm1_enable"
-echo 80 > "$HWMON/pwm1"
+echo 153 > "$HWMON/pwm1"        # X2 Mini ~60% (EC 110/184); oxpec 0–255 scale differs
 sleep 3
-echo 2 > "$HWMON/pwm1_enable"   # 2 = auto; older ABI uses 0
+echo 2 > "$HWMON/pwm1_enable"   # 2 = auto
 ```
 
 Failure table:
@@ -211,7 +211,8 @@ Failure table:
 | --- | --- | --- |
 | `Invalid module format` | vermagic ≠ `uname -r` | rebuild against matching headers |
 | `Key was rejected by service` / `Required key not available` | Secure Boot | disable SB, or sign with a MOK |
-| `insmod` succeeds but no hwmon | `board_name` mismatch | rerun `collect-dmi.sh`; watch spaces/case |
+| `insmod` succeeds but no hwmon | `board_name` mismatch, or looking for `oxpec` on X2 Mini | X2 Mini hwmon name is `oxp_wmi`; rerun `collect-dmi.sh` on AMD |
+| `Read-only file system` on `/pwm1` | `$HWMON` was empty; wrote `/pwm1` on ostree `/` | match `oxp_wmi` or `oxpec`, abort if empty |
 | `modprobe: FATAL: Module oxpec is in use` | userspace holds hwmon | stop InputPlumber / fan services, then `-r` |
 | cannot `modprobe -r oxpec` | `CONFIG_OXPEC=y` built-in | path B/C only (rebuild the kernel) |
 
