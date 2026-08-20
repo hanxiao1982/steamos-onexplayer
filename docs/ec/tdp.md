@@ -45,6 +45,8 @@ limit readback sticking, then the 15 W / 40 W load pair.
 ## Install (X2 Mini / Intel G3E)
 
 Needs `python3-dbus` and `python3-gobject` (GLib main loop). Root writes RAPL.
+Fedora/Bazzite `python3-dbus` has no `dbus.service.property`; the daemon uses
+`org.freedesktop.DBus.Properties` instead.
 
 ```bash
 sudo kmod/scripts/install-tdp-rapl.sh

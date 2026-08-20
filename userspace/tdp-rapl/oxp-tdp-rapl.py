@@ -34,7 +34,53 @@ PRODUCT_WATTS = {
 BUS_NAME = "com.steampowered.OxpRapl.Tdp"
 OBJ_PATH = "/com/steampowered/OxpRapl"
 IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
+PROPS_IFACE = "org.freedesktop.DBus.Properties"
 PL2_HEADROOM_W = 5
+
+# dbus-python on Bazzite/Fedora has no dbus.service.property (added in 1.3).
+# Advertise TdpLimit1 through Introspect + org.freedesktop.DBus.Properties.
+INTROSPECT_XML = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="{IFACE}">
+    <property name="TdpLimit" type="u" access="readwrite"/>
+    <property name="TdpLimitMin" type="u" access="read"/>
+    <property name="TdpLimitMax" type="u" access="read"/>
+  </interface>
+  <interface name="{PROPS_IFACE}">
+    <method name="Get">
+      <arg type="s" name="interface_name" direction="in"/>
+      <arg type="s" name="property_name" direction="in"/>
+      <arg type="v" name="value" direction="out"/>
+    </method>
+    <method name="Set">
+      <arg type="s" name="interface_name" direction="in"/>
+      <arg type="s" name="property_name" direction="in"/>
+      <arg type="v" name="value" direction="in"/>
+    </method>
+    <method name="GetAll">
+      <arg type="s" name="interface_name" direction="in"/>
+      <arg type="a{{sv}}" name="properties" direction="out"/>
+    </method>
+    <signal name="PropertiesChanged">
+      <arg type="s" name="interface_name"/>
+      <arg type="a{{sv}}" name="changed_properties"/>
+      <arg type="as" name="invalidated_properties"/>
+    </signal>
+  </interface>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect">
+      <arg type="s" name="xml_data" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Peer">
+    <method name="Ping"/>
+    <method name="GetMachineId">
+      <arg type="s" name="machine_uuid" direction="out"/>
+    </method>
+  </interface>
+</node>
+"""
 
 
 def _read_text(path: Path) -> str:
@@ -317,18 +363,24 @@ def run_self_test() -> int:
     assert wrote == 25
     assert _read_text(z / "constraint_0_power_limit_uw") == "25000000"
     assert _read_text(z / "constraint_1_power_limit_uw") == "30000000"
+    for name in ("TdpLimit", "TdpLimitMin", "TdpLimitMax", PROPS_IFACE, IFACE):
+        assert name in INTROSPECT_XML, name
     print("self-test ok")
     return 0
 
 
 def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
     import dbus
+    import dbus.exceptions
     import dbus.mainloop.glib
     import dbus.service
     from gi.repository import GLib
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
+
+    def err(name: str, msg: str) -> dbus.exceptions.DBusException:
+        return dbus.exceptions.DBusException(msg, name=name)
 
     class TdpLimit1(dbus.service.Object):
         def __init__(self):
@@ -342,24 +394,75 @@ def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
             self.cur_w = apply_watts(zone, watts, self.max_w)
             print(f"TDP -> {self.cur_w} W (PL1)", flush=True)
 
-        @dbus.service.property(IFACE, signature="u")
-        def TdpLimit(self):
-            return dbus.UInt32(self.cur_w)
+        def _props(self) -> dict:
+            return {
+                "TdpLimit": dbus.UInt32(self.cur_w),
+                "TdpLimitMin": dbus.UInt32(self.min_w),
+                "TdpLimitMax": dbus.UInt32(self.max_w),
+            }
 
-        @TdpLimit.setter
-        def TdpLimit(self, value):
+        def _check_iface(self, interface: str) -> None:
+            if interface not in ("", IFACE):
+                raise err(
+                    "org.freedesktop.DBus.Error.UnknownInterface",
+                    f"unknown interface {interface}",
+                )
+
+        @dbus.service.method(PROPS_IFACE, in_signature="ss", out_signature="v")
+        def Get(self, interface, prop):
+            self._check_iface(str(interface))
+            props = self._props()
+            key = str(prop)
+            if key not in props:
+                raise err(
+                    "org.freedesktop.DBus.Error.UnknownProperty",
+                    f"unknown property {key}",
+                )
+            return props[key]
+
+        @dbus.service.method(PROPS_IFACE, in_signature="s", out_signature="a{sv}")
+        def GetAll(self, interface):
+            self._check_iface(str(interface))
+            return self._props()
+
+        @dbus.service.method(PROPS_IFACE, in_signature="ssv", out_signature="")
+        def Set(self, interface, prop, value):
+            self._check_iface(str(interface))
+            key = str(prop)
+            if key != "TdpLimit":
+                raise err(
+                    "org.freedesktop.DBus.Error.PropertyReadOnly",
+                    f"property {key} is not writable",
+                )
             self._set_tdp(int(value))
+            self.PropertiesChanged(IFACE, {"TdpLimit": dbus.UInt32(self.cur_w)}, [])
 
-        @dbus.service.property(IFACE, signature="u")
-        def TdpLimitMin(self):
-            return dbus.UInt32(self.min_w)
+        @dbus.service.signal(PROPS_IFACE, signature="sa{sv}as")
+        def PropertiesChanged(self, interface, changed, invalidated):
+            pass
 
-        @dbus.service.property(IFACE, signature="u")
-        def TdpLimitMax(self):
-            return dbus.UInt32(self.max_w)
+        @dbus.service.method(
+            "org.freedesktop.DBus.Introspectable",
+            in_signature="",
+            out_signature="s",
+        )
+        def Introspect(self):
+            return INTROSPECT_XML
+
+        @dbus.service.method("org.freedesktop.DBus.Peer", in_signature="", out_signature="")
+        def Ping(self):
+            return
+
+        @dbus.service.method("org.freedesktop.DBus.Peer", in_signature="", out_signature="s")
+        def GetMachineId(self):
+            mid = Path("/etc/machine-id")
+            try:
+                return mid.read_text(encoding="utf-8").strip()
+            except OSError:
+                return "00000000000000000000000000000000"
 
     TdpLimit1()
-    # 1 = DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
+    # 1 = PRIMARY_OWNER, 4 = ALREADY_OWNER
     reply = int(bus.request_name(BUS_NAME))
     if reply not in (1, 4):
         raise RuntimeError(f"could not own {BUS_NAME} (request_name={reply})")
