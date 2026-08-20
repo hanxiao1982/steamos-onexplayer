@@ -228,28 +228,40 @@ def write_limit_uw(zone: Path, idx: int, uw: int) -> None:
 
 
 def apply_watts(zone: Path, watts: int, max_w: int, pl2_headroom: int = PL2_HEADROOM_W) -> int:
-    """Set package PL1 to watts and PL2 a little above. Returns the PL1 watts written."""
+    """Set package PL1 to watts and PL2 a little above. Returns the PL1 watts written.
+
+    Do not treat sysfs max_power_uw as a hard cap. On live X2 Mini, long_term
+    max reads 25 W while a 40 W write still sticks. Clamp only to the Steam
+    slider range (max_w). If the kernel rejects the write, retry at sysfs max.
+    """
     if zone_enabled(zone) is False:
         set_zone_enabled(zone, True)
     pl1, pl2 = pick_pl1_pl2(zone)
-    pl1_max_w = uw_to_w(pl1.get("max_uw"))
-    cap = max_w
-    if pl1_max_w and pl1_max_w > 0:
-        cap = min(cap, pl1_max_w)
-    if cap < 1:
-        cap = max_w
-    watts = clamp_w(watts, 1, cap)
-    write_limit_uw(zone, pl1["index"], w_to_uw(watts))
+    watts = clamp_w(watts, 1, max(1, max_w))
+    try:
+        write_limit_uw(zone, pl1["index"], w_to_uw(watts))
+    except (OSError, RuntimeError) as e:
+        pl1_max_w = uw_to_w(pl1.get("max_uw"))
+        if pl1_max_w and pl1_max_w > 0 and watts > pl1_max_w:
+            print(
+                f"PL1 {watts} W rejected ({e}); retry {pl1_max_w} W (sysfs max)",
+                flush=True,
+            )
+            watts = pl1_max_w
+            write_limit_uw(zone, pl1["index"], w_to_uw(watts))
+        else:
+            raise
     if pl2 is not None:
-        pl2_max_w = uw_to_w(pl2.get("max_uw")) or cap
-        if pl2_max_w <= 0:
-            pl2_max_w = cap
-        pl2_w = min(pl2_max_w, watts + max(0, pl2_headroom))
+        pl2_w = watts + max(0, pl2_headroom)
+        pl2_max_w = uw_to_w(pl2.get("max_uw"))
+        # short_term max=0 on this SKU means unspecified, not a 0 W ceiling.
+        if pl2_max_w and pl2_max_w > 0:
+            pl2_w = min(pl2_w, pl2_max_w)
         if pl2_w < watts:
             pl2_w = watts
         try:
             write_limit_uw(zone, pl2["index"], w_to_uw(pl2_w))
-        except OSError as e:
+        except (OSError, RuntimeError) as e:
             print(f"PL2 write skipped: {e}", file=sys.stderr)
     return watts
 
@@ -363,6 +375,13 @@ def run_self_test() -> int:
     assert wrote == 25
     assert _read_text(z / "constraint_0_power_limit_uw") == "25000000"
     assert _read_text(z / "constraint_1_power_limit_uw") == "30000000"
+    # Live X2 Mini: sysfs max=25 W must not block a 40 W write that sticks.
+    (z / "constraint_0_max_power_uw").write_text("25000000\n")
+    (z / "constraint_1_max_power_uw").write_text("0\n")
+    wrote = apply_watts(z, 40, 45)
+    assert wrote == 40, wrote
+    assert _read_text(z / "constraint_0_power_limit_uw") == "40000000"
+    assert _read_text(z / "constraint_1_power_limit_uw") == "45000000"
     for name in ("TdpLimit", "TdpLimitMin", "TdpLimitMax", PROPS_IFACE, IFACE):
         assert name in INTROSPECT_XML, name
     print("self-test ok")
@@ -394,7 +413,14 @@ def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
             self.cur_w = apply_watts(zone, watts, self.max_w)
             print(f"TDP -> {self.cur_w} W (PL1)", flush=True)
 
+        def _refresh_from_sysfs(self) -> None:
+            cur = current_pl1_watts(zone)
+            if cur is None:
+                return
+            self.cur_w = clamp_w(cur, self.min_w, self.max_w)
+
         def _props(self) -> dict:
+            self._refresh_from_sysfs()
             return {
                 "TdpLimit": dbus.UInt32(self.cur_w),
                 "TdpLimitMin": dbus.UInt32(self.min_w),

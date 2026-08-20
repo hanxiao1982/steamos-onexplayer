@@ -116,7 +116,14 @@ fi
 echo -n "no_turbo="; cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo "?"
 
 echo "=== remotes.d ==="
-ls -l /usr/share/steamos-manager/remotes.d /etc/steamos-manager/remotes.d 2>/dev/null || echo "(no remotes.d)"
+for d in /usr/share/steamos-manager/remotes.d /etc/steamos-manager/remotes.d; do
+  if [[ -d "$d" ]]; then
+    echo "$d:"
+    ls -l "$d"
+  else
+    echo "(missing $d)"
+  fi
+done
 
 if [[ -n "$SET_W" ]]; then
   if [[ "${EUID}" -ne 0 ]]; then

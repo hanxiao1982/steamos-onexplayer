@@ -39,8 +39,18 @@ sudo kmod/scripts/diag-tdp.sh --set 40 --measure 5
 ```
 
 Limits are working only if the two package-watt samples separate and
-frequencies move with them. See the earlier RAPL checklist: counters ticking,
-limit readback sticking, then the 15 W / 40 W load pair.
+frequencies move with them. An idle SSH login sampling ~5 W at both 15 W and
+40 W only proves the **cap files accept writes**, not that RAPL is throttling.
+
+Live `ONEXPLAYER X2Mini` (Bazzite): package `long_term` `max_power_uw` is 25 W,
+but `diag-tdp.sh --set 40` read back 40 W / 45 W PL1/PL2. That sysfs max is a
+BIOS default, not a write ceiling. The daemon therefore clamps only to the
+Steam slider range (8–45 W). `energy_uj` is `0400` root-only, so the overlay
+often shows 0 W.
+
+`diag-tdp.sh` over SSH cannot see session `SteamOSManager1` (no user bus).
+Check `TdpLimit1` / `RemoteInterfaces` from Game Mode or a desktop login, then
+fully restart Steam.
 
 ## Install (X2 Mini / Intel G3E)
 
