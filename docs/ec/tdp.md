@@ -142,3 +142,9 @@ sudo kmod/scripts/diag-gpu.sh
 Windows OneXConsole writes MSR PL + Intel DTT/graphics policy (`intelTdpSetType=4`).
 This remote only writes powercap sysfs. Overlay CPU watts are often 0 on this
 unit because `energy_uj` is root-only.
+
+Live X2 Mini (same game, PL1 already 45 W): BIOS PL4 55 W → `act_freq=1400`,
+`reason_pl4=1`, package ~14.8 W. After writing `peak_power=160 W` on MSR and
+MMIO: `act_freq=2300`, `reasons=none`, package ~32.6 W, CPU ~2.3 GHz. Reboot
+restores 55 W unless `oxp-tdp-rapl` is installed (it writes PL4=160 on start
+and on each `TdpLimit` set).
