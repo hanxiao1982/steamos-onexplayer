@@ -42,13 +42,52 @@ Limits are working only if the two package-watt samples separate and
 frequencies move with them. An idle SSH login sampling ~5 W at both 15 W and
 40 W only proves the **cap files accept writes**, not that RAPL is throttling.
 
-TDP is a **cap**, not a target: ~30 W at PL1=45 W is success. ~27 W right
-after `--set 25` with a ~28 s BIOS PL1 window still includes the previous
-45 W period. `diag-tdp.sh --set` now runs `oxp-tdp-rapl --set` (MSR **and**
-MMIO PL1, GT `max_freq`, 2 s tau) and settles 3 s before `--measure`. Check
-`intel-rapl-mmio:0` long_term and GT0 `max_freq` after each set. Game Mode
-is not GPU-idle; 45 W + `max=2300` can keep `act_freq` at RP0 while Steam
-composites.
+TDP is a **cap**, not a target: ~30 W at PL1=45 W is success. OneXConsole
+does **not** write RAPL `long_term` tau (see below), so the BIOS ~28 s
+window stays. A 10 s `energy_uj` sample right after `--set 25` can still
+include the previous 45 W period (~27 W). That is averaging, not a failed
+write. `diag-tdp.sh --set` runs `oxp-tdp-rapl --set` (MSR **and** MMIO PL1,
+GT `max_freq`; firmware tau) and settles a few seconds for PCODE/GT, not
+for the 28 s window to roll over. Check `intel-rapl-mmio:0` long_term and
+GT0 `max_freq` after each set. Game Mode is not GPU-idle; 45 W +
+`max=2300` can keep `act_freq` at RP0 while Steam composites.
+
+## OneXConsole and `long_term` (tau)
+
+RAPL `constraint_0` / `long_term` is two knobs: **watts** (`power_limit_uw`)
+and **window** (`time_window_us`, Intel tau). Live X2 Mini BIOS encodes
+about **28 s** (`27983872` µs). PL2 `short_term` stays ~1 ms.
+
+Windows OneXConsole 0.10.2-fix8 never takes a tau argument:
+
+| Call | What it writes |
+|---|---|
+| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | PL1 / PL2 **watts** (`intelTdpSetType=4` on G3E) |
+| `/msr/setCpuPl4/{pl4}/{type}` | PL4 watts |
+| `/tdp/init/{min}/{max}/{maxBoost}` | UI slider bounds only |
+| `/func/getOXPSetTdpAble` | EC `0xED` gate read (stays 0; TDP is not EC) |
+| `changePl4Func` keys | Adapter-class / PL4 table, not a time window |
+
+CompatLayerCT type 4 is Intel DTT/IPF (or a raw MSR write of
+`PKG_POWER_LIMIT` **watts + clamp-enable bits**). There is no public
+`time_window` / `long_term` path. Firmware tau is left alone. Windows
+“feels” like the slider matches because DTT/PCODE also steers GT, not
+because they set a 2 s window.
+
+**Replicable on Linux:** write PL1/PL2/PL4 watts on `intel-rapl:0` **and**
+`intel-rapl-mmio:0`; do **not** write `constraint_*_time_window_us`. The
+daemon only restores ~28 s if a previous build left a 2 s leftover.
+`OXP_TDP_PL1_WINDOW_US` is an explicit diag override, not the default.
+
+**Not replicable without Windows DTT:** SoC slider
+(`processor_thermal_soc_slider`), GuC idle-down under Game Mode, and
+whatever mailbox type 4 uses besides package watts. Shortening tau on
+Linux only makes a 10 s `energy_uj` sample look closer to the new cap; it
+is not how OneXConsole works.
+
+To judge a lower TDP, wait longer than the printed `window=` (about 28 s)
+or use `--measure 30`. A 10 s sample after dropping 45 → 25 W can still
+read above 25 W.
 
 Live `ONEXPLAYER X2Mini` (Bazzite): package `long_term` `max_power_uw` is 25 W,
 but `diag-tdp.sh --set 40` read back 40 W / 45 W PL1/PL2. That sysfs max is a

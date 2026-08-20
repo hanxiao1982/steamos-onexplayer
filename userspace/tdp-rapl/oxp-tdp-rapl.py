@@ -53,10 +53,12 @@ OBJ_PATH = "/com/steampowered/OxpRapl"
 IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
 PROPS_IFACE = "org.freedesktop.DBus.Properties"
 PL2_HEADROOM_W = 5
-# BIOS long_term window is ~28 s, so a 10 s energy sample after --set 25 can
-# still include the previous 45 W period (live: 27.4 W "at" 25 W). Handheld
-# TDP needs a short tau; 2 s is enough for diag --measure 10 to see the cap.
-PL1_WINDOW_US = 2_000_000
+# OneXConsole /msr/setCpuPl/{pl1}/{pl2}/{type} has no tau / time_window arg.
+# Live X2 Mini BIOS leaves long_term at ~28 s (PKG_POWER_LIMIT encoding).
+# Do not rewrite that window; a 2 s tau was our measurement shortcut, not a
+# Windows clone. Restore BIOS if a previous daemon left 2 s behind.
+BIOS_PL1_WINDOW_US = 27_983_872
+LEGACY_PL1_WINDOW_US = 2_000_000
 
 # dbus-python on Bazzite/Fedora has no dbus.service.property (added in 1.3).
 # Advertise TdpLimit1 through Introspect + org.freedesktop.DBus.Properties.
@@ -279,6 +281,27 @@ def write_window_us(zone: Path, idx: int, us: int) -> None:
         print(f"time window skipped: {e}", file=sys.stderr)
 
 
+def desired_pl1_window_us(current: int | None) -> int | None:
+    """Window to write, or None to leave firmware tau (OneXConsole).
+
+    Public Windows path is watts only. OXP_TDP_PL1_WINDOW_US is an explicit
+    override for diag; otherwise undo our old 2 s leftover.
+    """
+    env = os.environ.get("OXP_TDP_PL1_WINDOW_US", "").strip()
+    if env.isdigit():
+        return int(env)
+    if current == LEGACY_PL1_WINDOW_US:
+        return BIOS_PL1_WINDOW_US
+    return None
+
+
+def maybe_sync_pl1_window(zone: Path, pl1: dict) -> None:
+    want = desired_pl1_window_us(pl1.get("window_us"))
+    if want is None:
+        return
+    write_window_us(zone, pl1["index"], want)
+
+
 def apply_watts(
     zone: Path,
     watts: int,
@@ -300,7 +323,7 @@ def apply_watts(
     watts = clamp_w(watts, 1, max(1, max_w))
     try:
         write_limit_uw(zone, pl1["index"], w_to_uw(watts))
-        write_window_us(zone, pl1["index"], PL1_WINDOW_US)
+        maybe_sync_pl1_window(zone, pl1)
     except (OSError, RuntimeError) as e:
         pl1_max_w = uw_to_w(pl1.get("max_uw"))
         if pl1_max_w and pl1_max_w > 0 and watts > pl1_max_w:
@@ -310,7 +333,7 @@ def apply_watts(
             )
             watts = pl1_max_w
             write_limit_uw(zone, pl1["index"], w_to_uw(watts))
-            write_window_us(zone, pl1["index"], PL1_WINDOW_US)
+            maybe_sync_pl1_window(zone, pl1)
         else:
             raise
     if pl2 is not None:
@@ -550,7 +573,21 @@ def run_self_test() -> int:
     assert wrote == 25
     assert _read_text(z / "constraint_0_power_limit_uw") == "25000000"
     assert _read_text(z / "constraint_1_power_limit_uw") == "30000000"
-    assert _read_text(z / "constraint_0_time_window_us") == "2000000"
+    # OneXConsole does not write tau; leave the BIOS ~28 s window.
+    assert _read_text(z / "constraint_0_time_window_us") == "27983872"
+    # Previous daemon leftover 2 s → restore BIOS default.
+    (z / "constraint_0_time_window_us").write_text("2000000\n")
+    wrote = apply_watts(z, 25, 45)
+    assert wrote == 25
+    assert _read_text(z / "constraint_0_time_window_us") == "27983872"
+    os.environ["OXP_TDP_PL1_WINDOW_US"] = "2000000"
+    try:
+        wrote = apply_watts(z, 25, 45)
+        assert wrote == 25
+        assert _read_text(z / "constraint_0_time_window_us") == "2000000"
+    finally:
+        del os.environ["OXP_TDP_PL1_WINDOW_US"]
+    (z / "constraint_0_time_window_us").write_text("27983872\n")
     # Live X2 Mini: sysfs max=25 W must not block a 40 W write that sticks.
     (z / "constraint_0_max_power_uw").write_text("25000000\n")
     (z / "constraint_1_max_power_uw").write_text("0\n")
@@ -562,6 +599,13 @@ def run_self_test() -> int:
     assert _read_text(z / "constraint_0_power_limit_uw") == "40000000"
     assert _read_text(z / "constraint_1_power_limit_uw") == "45000000"
     assert _read_text(z / "constraint_2_power_limit_uw") == "160000000"
+    assert desired_pl1_window_us(27_983_872) is None
+    assert desired_pl1_window_us(2_000_000) == BIOS_PL1_WINDOW_US
+    os.environ["OXP_TDP_PL1_WINDOW_US"] = "1000000"
+    try:
+        assert desired_pl1_window_us(27_983_872) == 1_000_000
+    finally:
+        del os.environ["OXP_TDP_PL1_WINDOW_US"]
     assert lerp_int(8, 8, 45, 70, 160) == 70
     assert lerp_int(45, 8, 45, 70, 160) == 160
     assert lerp_int(8, 8, 45, 1000, 2300) == 1000

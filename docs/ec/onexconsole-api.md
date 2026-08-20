@@ -181,6 +181,15 @@ Changing TDP in the UI does **not** write watts into an EC register. After optio
 
 `/tdp/init/...` only refreshes min/max/boost bounds used by the UI.
 
+There is **no** tau / `time_window` / `long_term` argument on these routes.
+`setCpuPl` writes watts (and, inside CompatLayerCT, the usual RAPL
+clamp-enable bits). Firmware PL1 window stays at the BIOS default
+(~28 s on live X2 Mini `constraint_0_time_window_us=27983872`).
+`changePl4Func` is adapter-class / PL4, not a window write. Linux should
+copy that: set PL1/PL2/PL4 watts, leave `time_window_us` alone. A short
+tau is a measurement convenience, not a OneXConsole clone. See
+[tdp.md](tdp.md#onexconsole-and-long_term-tau).
+
 ## How to use this on the device
 
 1. Start OneXConsole. Confirm `CompatLayerCT.exe` and `netstat` `:1013`.

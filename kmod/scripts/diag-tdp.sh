@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Dump Intel RAPL + TdpLimit1 state. Optional --set / --measure for the load test.
-# --set applies the same policy as oxp-tdp-rapl (MSR+MMIO PL1/PL2/PL4, GT range,
-# short PL1 tau). Do not tee only intel-rapl:0 — PCODE/GPU follow MMIO.
+# --set applies the same policy as oxp-tdp-rapl (MSR+MMIO PL1/PL2/PL4, GT range;
+# firmware PL1 tau, same as OneXConsole). Do not tee only intel-rapl:0 —
+# PCODE/GPU follow MMIO.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -16,8 +17,9 @@ Usage:
   diag-tdp.sh --set W         Full TDP policy (PL1/PL2/PL4 + GT), then dump
   diag-tdp.sh --measure SEC   Sample package energy_uj for SEC seconds
 
-TDP is a cap, not a target. 30 W at PL1=45 W is fine. After --set, wait
-longer than the PL1 window (~2 s) before --measure; BIOS default was ~28 s.
+TDP is a cap, not a target. 30 W at PL1=45 W is fine. OneXConsole does not
+rewrite long_term tau; BIOS window is ~28 s. A 10 s --measure after dropping
+45→25 W can still include the old period. Wait for window= or use --measure 30.
 EOF
 }
 
@@ -171,8 +173,12 @@ if [[ -n "$MEASURE" ]]; then
     exit 3
   fi
   if [[ -n "$SET_W" ]]; then
-    echo "settling 3s (PL1 window ~2 s; BIOS tau was ~28 s)"
-    sleep 3
+    win="?"
+    if [[ -n "$PKG" && -r "$PKG/constraint_0_time_window_us" ]]; then
+      win="$(tr -d '\n' <"$PKG/constraint_0_time_window_us")"
+    fi
+    echo "settling 5s for PCODE/GT (PL1 window=${win} us; energy_uj still averages that window)"
+    sleep 5
   fi
   e1="$(cat "$PKG/energy_uj")"
   sleep "$MEASURE"

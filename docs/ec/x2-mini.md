@@ -55,7 +55,7 @@ Cross-checked against `background.js` routes. None of these write the G3E EC map
 
 | UI | OneXConsole path | Notes |
 |---|---|---|
-| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | `intelTdpSetType=4`. `0xED` stays 0. |
+| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | Watts only; no tau / `time_window`. `intelTdpSetType=4`. `0xED` stays 0. |
 | CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Does not touch `0xEB`. |
 | CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Power plan. Off → `0`. |
 | GPU clock | — | X2 Mini does **not** enable `manualGpuClk` / `gpuClk`. |
