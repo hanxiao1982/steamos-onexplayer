@@ -53,6 +53,10 @@ OBJ_PATH = "/com/steampowered/OxpRapl"
 IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
 PROPS_IFACE = "org.freedesktop.DBus.Properties"
 PL2_HEADROOM_W = 5
+# BIOS long_term window is ~28 s, so a 10 s energy sample after --set 25 can
+# still include the previous 45 W period (live: 27.4 W "at" 25 W). Handheld
+# TDP needs a short tau; 2 s is enough for diag --measure 10 to see the cap.
+PL1_WINDOW_US = 2_000_000
 
 # dbus-python on Bazzite/Fedora has no dbus.service.property (added in 1.3).
 # Advertise TdpLimit1 through Introspect + org.freedesktop.DBus.Properties.
@@ -263,6 +267,18 @@ def write_limit_uw(zone: Path, idx: int, uw: int) -> None:
         )
 
 
+def write_window_us(zone: Path, idx: int, us: int) -> None:
+    path = zone / f"constraint_{idx}_time_window_us"
+    if not path.is_file():
+        return
+    try:
+        path.write_text(f"{us}\n", encoding="utf-8")
+        time.sleep(0.05)
+        print(f"{path} -> {_read_text(path)} us (wanted {us})", flush=True)
+    except OSError as e:
+        print(f"time window skipped: {e}", file=sys.stderr)
+
+
 def apply_watts(
     zone: Path,
     watts: int,
@@ -284,6 +300,7 @@ def apply_watts(
     watts = clamp_w(watts, 1, max(1, max_w))
     try:
         write_limit_uw(zone, pl1["index"], w_to_uw(watts))
+        write_window_us(zone, pl1["index"], PL1_WINDOW_US)
     except (OSError, RuntimeError) as e:
         pl1_max_w = uw_to_w(pl1.get("max_uw"))
         if pl1_max_w and pl1_max_w > 0 and watts > pl1_max_w:
@@ -293,6 +310,7 @@ def apply_watts(
             )
             watts = pl1_max_w
             write_limit_uw(zone, pl1["index"], w_to_uw(watts))
+            write_window_us(zone, pl1["index"], PL1_WINDOW_US)
         else:
             raise
     if pl2 is not None:
@@ -527,10 +545,12 @@ def run_self_test() -> int:
     pl1, pl2 = pick_pl1_pl2(z)
     assert pl1["name"] == "long_term" and pl1["index"] == 0
     assert pl2 is not None and pl2["name"] == "short_term"
+    (z / "constraint_0_time_window_us").write_text("27983872\n")
     wrote = apply_watts(z, 25, 45)
     assert wrote == 25
     assert _read_text(z / "constraint_0_power_limit_uw") == "25000000"
     assert _read_text(z / "constraint_1_power_limit_uw") == "30000000"
+    assert _read_text(z / "constraint_0_time_window_us") == "2000000"
     # Live X2 Mini: sysfs max=25 W must not block a 40 W write that sticks.
     (z / "constraint_0_max_power_uw").write_text("25000000\n")
     (z / "constraint_1_max_power_uw").write_text("0\n")

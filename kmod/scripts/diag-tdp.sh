@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Dump Intel RAPL + TdpLimit1 state. Optional --set / --measure for the load test.
-# Does not need the oxp-tdp-rapl daemon. Run as root to write limits.
+# --set applies the same policy as oxp-tdp-rapl (MSR+MMIO PL1/PL2/PL4, GT range,
+# short PL1 tau). Do not tee only intel-rapl:0 — PCODE/GPU follow MMIO.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SET_W=""
 MEASURE=""
 PKG=""
@@ -11,10 +13,11 @@ usage() {
   cat <<'EOF'
 Usage:
   diag-tdp.sh                 Print RAPL zones, DMI, TdpLimit1, governors
-  diag-tdp.sh --set W         Write package PL1/PL2 to W watts (root)
+  diag-tdp.sh --set W         Full TDP policy (PL1/PL2/PL4 + GT), then dump
   diag-tdp.sh --measure SEC   Sample package energy_uj for SEC seconds
 
-Same load, two --set values (15 then 40) is what proves RAPL *limits* work.
+TDP is a cap, not a target. 30 W at PL1=45 W is fine. After --set, wait
+longer than the PL1 window (~2 s) before --measure; BIOS default was ~28 s.
 EOF
 }
 
@@ -49,6 +52,60 @@ read_dmi() {
   fi
 }
 
+dump_rapl() {
+  PKG=""
+  echo "=== RAPL ==="
+  shopt -s nullglob
+  local d c i
+  for d in /sys/class/powercap/intel-rapl:* /sys/class/powercap/intel-rapl-mmio:*; do
+    [[ -d "$d" ]] || continue
+    echo -n "$d  name="
+    cat "$d/name" 2>/dev/null || echo "?"
+    echo -n "  enabled="
+    cat "$d/enabled" 2>/dev/null || echo "?"
+    for c in "$d"/constraint_*_name; do
+      [[ -e "$c" ]] || continue
+      i="${c##*/}"
+      i="${i#constraint_}"
+      i="${i%_name}"
+      printf "  [%s] %s  limit=%s uW  max=%s  window=%s us\n" \
+        "$i" "$(cat "$c")" \
+        "$(cat "$d/constraint_${i}_power_limit_uw" 2>/dev/null || echo ?)" \
+        "$(cat "$d/constraint_${i}_max_power_uw" 2>/dev/null || echo ?)" \
+        "$(cat "$d/constraint_${i}_time_window_us" 2>/dev/null || echo ?)"
+    done
+    if [[ -z "$PKG" ]] && grep -qi '^package' "$d/name" 2>/dev/null && [[ "$d" == *intel-rapl:0 ]]; then
+      PKG="$d"
+    fi
+  done
+  shopt -u nullglob
+  if [[ -z "$PKG" && -d /sys/class/powercap/intel-rapl:0 ]]; then
+    PKG=/sys/class/powercap/intel-rapl:0
+  fi
+  echo "package zone: ${PKG:-none}"
+  if [[ -n "$PKG" ]]; then
+    echo -n "energy_uj perms: "
+    ls -l "$PKG/energy_uj" 2>/dev/null || true
+  fi
+}
+
+dump_gt() {
+  echo "=== GT0 freq ==="
+  shopt -s nullglob
+  local d
+  for d in /sys/class/drm/card*/device/tile*/gt0/freq0 /sys/class/drm/card*/device/gt0/freq0; do
+    [[ -d "$d" ]] || continue
+    case "$d" in
+      */card*[!0-9]/*) continue ;;
+    esac
+    echo "-- $d"
+    for n in act_freq cur_freq min_freq max_freq rp0_freq rpe_freq; do
+      [[ -e "$d/$n" ]] && printf '  %s=%s\n' "$n" "$(tr -d '\n' <"$d/$n")"
+    done
+  done
+  shopt -u nullglob
+}
+
 echo "=== DMI ==="
 echo "sys_vendor=$(read_dmi sys_vendor)"
 echo "product_name=$(read_dmi product_name)"
@@ -57,38 +114,21 @@ echo "board_name=$(read_dmi board_name)"
 echo "=== modules ==="
 lsmod | grep -E 'intel_rapl|rapl' || echo "(no intel_rapl* in lsmod)"
 
-echo "=== RAPL ==="
-shopt -s nullglob
-for d in /sys/class/powercap/intel-rapl:*; do
-  [[ -d "$d" ]] || continue
-  echo -n "$d  name="
-  cat "$d/name" 2>/dev/null || echo "?"
-  echo -n "  enabled="
-  cat "$d/enabled" 2>/dev/null || echo "?"
-  for c in "$d"/constraint_*_name; do
-    [[ -e "$c" ]] || continue
-    i="${c##*/}"
-    i="${i#constraint_}"
-    i="${i%_name}"
-    printf "  [%s] %s  limit=%s uW  max=%s  window=%s us\n" \
-      "$i" "$(cat "$c")" \
-      "$(cat "$d/constraint_${i}_power_limit_uw" 2>/dev/null || echo ?)" \
-      "$(cat "$d/constraint_${i}_max_power_uw" 2>/dev/null || echo ?)" \
-      "$(cat "$d/constraint_${i}_time_window_us" 2>/dev/null || echo ?)"
-  done
-  if [[ -z "$PKG" ]] && grep -qi '^package' "$d/name" 2>/dev/null; then
-    PKG="$d"
+if [[ -n "$SET_W" ]]; then
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "--set needs root" >&2
+    exit 1
   fi
-done
-shopt -u nullglob
-if [[ -z "$PKG" && -d /sys/class/powercap/intel-rapl:0 ]]; then
-  PKG=/sys/class/powercap/intel-rapl:0
+  echo "=== apply TDP policy ${SET_W} W (MSR+MMIO+GT) ==="
+  if [[ -x /usr/local/sbin/oxp-tdp-rapl ]]; then
+    /usr/local/sbin/oxp-tdp-rapl --set "$SET_W"
+  else
+    python3 "${ROOT}/userspace/tdp-rapl/oxp-tdp-rapl.py" --set "$SET_W"
+  fi
 fi
-echo "package zone: ${PKG:-none}"
-if [[ -n "$PKG" ]]; then
-  echo -n "energy_uj perms: "
-  ls -l "$PKG/energy_uj" 2>/dev/null || true
-fi
+
+dump_rapl
+dump_gt
 
 echo "=== TdpLimit1 (session) ==="
 if busctl --user status com.steampowered.SteamOSManager1 >/dev/null 2>&1; then
@@ -125,82 +165,20 @@ for d in /usr/share/steamos-manager/remotes.d /etc/steamos-manager/remotes.d; do
   fi
 done
 
-if [[ -n "$SET_W" ]]; then
-  if [[ "${EUID}" -ne 0 ]]; then
-    echo "--set needs root" >&2
-    exit 1
-  fi
-  if [[ -z "$PKG" ]]; then
-    echo "no package RAPL zone" >&2
-    exit 3
-  fi
-  pl1=""
-  pl2=""
-  for c in "$PKG"/constraint_*_name; do
-    [[ -e "$c" ]] || continue
-    i="${c##*/}"; i="${i#constraint_}"; i="${i%_name}"
-    n="$(cat "$c")"
-    case "$n" in
-      long_term) pl1="$PKG/constraint_${i}_power_limit_uw" ;;
-      short_term) pl2="$PKG/constraint_${i}_power_limit_uw" ;;
-    esac
-  done
-  if [[ -z "$pl1" && -e "$PKG/constraint_0_power_limit_uw" ]]; then
-    pl1="$PKG/constraint_0_power_limit_uw"
-  fi
-  uw=$((SET_W * 1000000))
-  echo "=== write PL1=${SET_W} W ==="
-  printf '%s\n' "$uw" | tee "$pl1" >/dev/null
-  if [[ -n "$pl2" ]]; then
-    pl2w=$((SET_W + 5))
-    printf '%s\n' $((pl2w * 1000000)) | tee "$pl2" >/dev/null || echo "PL2 write failed"
-  fi
-  # PL4 70–160 W across 8–45 W. Constant 160 W lets GT sit at 2.3 GHz.
-  if [[ -z "${OXP_TDP_PL4:-}" ]]; then
-    pl4w=$((70 + (SET_W - 8) * 90 / 37))
-    if [[ "$pl4w" -lt 70 ]]; then pl4w=70; fi
-    if [[ "$pl4w" -gt 160 ]]; then pl4w=160; fi
-  else
-    pl4w="${OXP_TDP_PL4}"
-  fi
-  for pkg in "$PKG" /sys/class/powercap/intel-rapl-mmio:0; do
-    [[ -d "$pkg" ]] || continue
-    peak=""
-    for c in "$pkg"/constraint_*_name; do
-      [[ -e "$c" ]] || continue
-      i="${c##*/}"; i="${i#constraint_}"; i="${i%_name}"
-      n="$(cat "$c")"
-      if [[ "$n" == peak_power ]]; then
-        peak="$pkg/constraint_${i}_power_limit_uw"
-      fi
-    done
-    if [[ -n "$peak" ]]; then
-      echo "=== write ${pkg##*/} PL4=${pl4w} W ==="
-      printf '%s\n' $((pl4w * 1000000)) >"$peak" || echo "PL4 write failed: $peak"
-    fi
-  done
-  sleep 0.2
-  echo -n "readback PL1="; cat "$pl1"
-  [[ -n "$pl2" ]] && { echo -n "readback PL2="; cat "$pl2"; }
-  if [[ -r /sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw ]]; then
-    echo -n "readback MSR PL4="; cat /sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw
-  fi
-  if [[ -r /sys/class/powercap/intel-rapl-mmio:0/constraint_2_power_limit_uw ]]; then
-    echo -n "readback MMIO PL4="; cat /sys/class/powercap/intel-rapl-mmio:0/constraint_2_power_limit_uw
-  fi
-fi
-
 if [[ -n "$MEASURE" ]]; then
   if [[ -z "$PKG" ]]; then
     echo "no package RAPL zone" >&2
     exit 3
   fi
+  if [[ -n "$SET_W" ]]; then
+    echo "settling 3s (PL1 window ~2 s; BIOS tau was ~28 s)"
+    sleep 3
+  fi
   e1="$(cat "$PKG/energy_uj")"
   sleep "$MEASURE"
   e2="$(cat "$PKG/energy_uj")"
-  # integer watts: (e2-e1) / (sec * 1e6)
   awk -v e1="$e1" -v e2="$e2" -v s="$MEASURE" 'BEGIN {
     if (s <= 0) { print "bad interval"; exit 1 }
-    printf "package ~ %.1f W over %ss\n", (e2-e1)/(s*1000000.0), s
+    printf "package ~ %.1f W over %ss (cap, not a target)\n", (e2-e1)/(s*1000000.0), s
   }'
 fi

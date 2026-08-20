@@ -42,6 +42,14 @@ Limits are working only if the two package-watt samples separate and
 frequencies move with them. An idle SSH login sampling ~5 W at both 15 W and
 40 W only proves the **cap files accept writes**, not that RAPL is throttling.
 
+TDP is a **cap**, not a target: ~30 W at PL1=45 W is success. ~27 W right
+after `--set 25` with a ~28 s BIOS PL1 window still includes the previous
+45 W period. `diag-tdp.sh --set` now runs `oxp-tdp-rapl --set` (MSR **and**
+MMIO PL1, GT `max_freq`, 2 s tau) and settles 3 s before `--measure`. Check
+`intel-rapl-mmio:0` long_term and GT0 `max_freq` after each set. Game Mode
+is not GPU-idle; 45 W + `max=2300` can keep `act_freq` at RP0 while Steam
+composites.
+
 Live `ONEXPLAYER X2Mini` (Bazzite): package `long_term` `max_power_uw` is 25 W,
 but `diag-tdp.sh --set 40` read back 40 W / 45 W PL1/PL2. That sysfs max is a
 BIOS default, not a write ceiling. The daemon therefore clamps only to the
