@@ -114,7 +114,9 @@ deadlock).
   ~15 W is that gap, not a failed PL1 write.
 - Fan (`FanControl1` is already on the bus on the live unit; wiring it to
   `oxp_wmi` pwm is a separate job).
-- PL4 / adapter-class tables (`0xE3`).
+- PL4 / adapter-class tables (`0xE3`) beyond the OneXConsole 160/120/65 W peak
+  values. The remote writes PL4=160 W (key 1–5) so Xe `reason_pl4` can clear;
+  it does not yet read EC `0xE3` to pick 120/65.
 - `oxp-wmi` / EC `0xED`.
 
 ## If games stay ~15 W with GPU ≤ 1.5 GHz
@@ -133,7 +135,7 @@ sudo kmod/scripts/diag-gpu.sh
 | What you see | Meaning |
 |---|---|
 | `max_freq` (or `gt_max_freq_mhz`) ≈ 1500, `rp0` ≈ 2300 | Linux GT max request is capped; try `sudo kmod/scripts/diag-gpu.sh --raise-max` |
-| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/*` set | PCODE / thermal / another powercap is holding GT |
+| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 / IccMax.** Live X2 Mini: GuC `cur_freq=2300`, `act_freq=1400`, BIOS `peak_power=55 W`. OneXConsole sets PL4 **160 W** (keys 1–5). The RAPL remote now writes `peak_power` to 160 W on both MSR and MMIO package zones. |
 | A **non-** `intel-rapl:0` powercap zone still at ~15 W | `processor_thermal_rapl` / DPTF, not our TdpLimit1 writer |
 | Overlay 15 W but `diag-tdp.sh --measure` much higher | Overlay telemetry (often `energy_uj` 0400 or i915/xe), not package RAPL |
 

@@ -155,9 +155,33 @@ if [[ -n "$SET_W" ]]; then
     pl2w=$((SET_W + 5))
     printf '%s\n' $((pl2w * 1000000)) | tee "$pl2" >/dev/null || echo "PL2 write failed"
   fi
+  # OneXConsole key 1–5 → PL4 160 W. BIOS 55 W trips Xe reason_pl4.
+  pl4w="${OXP_TDP_PL4:-160}"
+  for pkg in "$PKG" /sys/class/powercap/intel-rapl-mmio:0; do
+    [[ -d "$pkg" ]] || continue
+    peak=""
+    for c in "$pkg"/constraint_*_name; do
+      [[ -e "$c" ]] || continue
+      i="${c##*/}"; i="${i#constraint_}"; i="${i%_name}"
+      n="$(cat "$c")"
+      if [[ "$n" == peak_power ]]; then
+        peak="$pkg/constraint_${i}_power_limit_uw"
+      fi
+    done
+    if [[ -n "$peak" ]]; then
+      echo "=== write ${pkg##*/} PL4=${pl4w} W ==="
+      printf '%s\n' $((pl4w * 1000000)) >"$peak" || echo "PL4 write failed: $peak"
+    fi
+  done
   sleep 0.2
   echo -n "readback PL1="; cat "$pl1"
   [[ -n "$pl2" ]] && { echo -n "readback PL2="; cat "$pl2"; }
+  if [[ -r /sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw ]]; then
+    echo -n "readback MSR PL4="; cat /sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw
+  fi
+  if [[ -r /sys/class/powercap/intel-rapl-mmio:0/constraint_2_power_limit_uw ]]; then
+    echo -n "readback MMIO PL4="; cat /sys/class/powercap/intel-rapl-mmio:0/constraint_2_power_limit_uw
+  fi
 fi
 
 if [[ -n "$MEASURE" ]]; then

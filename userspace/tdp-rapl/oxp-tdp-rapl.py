@@ -31,6 +31,20 @@ PRODUCT_WATTS = {
     "ONEXPLAYER Apex i": (8, 46, 25),
 }
 
+# OneXConsole changePl4Func: keys 1–5 → 160 W, 9 → 120, 8 → 65.
+# Battery-only on X2 Mini is key 1. BIOS peak_power is 55 W and Xe
+# reason_pl4 clips GT to ~1.4 GHz while GuC asks for 2.3 GHz.
+PRODUCT_PL4 = {
+    "ONEXPLAYER X2Mini": 160,
+    "ONEXPLAYER X2": 160,
+    "ONEXPLAYER X2 EVA": 160,
+    "ONEXPLAYER 3": 160,
+    "ONEXPLAYER Apex Air": 160,
+    "ONEXPLAYER Apex i": 160,
+}
+DEFAULT_PL4_W = 160
+PL4_FALLBACKS = (160, 120, 90, 65)
+
 BUS_NAME = "com.steampowered.OxpRapl.Tdp"
 OBJ_PATH = "/com/steampowered/OxpRapl"
 IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
@@ -117,24 +131,35 @@ def iter_rapl_zones(root: Path = POWERCAP) -> list[Path]:
         return []
     zones = []
     for p in sorted(root.iterdir()):
-        if p.name.startswith("intel-rapl:") and (p / "name").is_file():
+        if not (p / "name").is_file():
+            continue
+        # intel-rapl:0 (MSR) and intel-rapl-mmio:0 (PCODE/GPU-visible).
+        # mmio does not start with "intel-rapl:" ('-' vs ':').
+        if p.name.startswith("intel-rapl:") or p.name.startswith("intel-rapl-mmio:"):
             zones.append(p)
     return zones
 
 
+def package_zones(root: Path = POWERCAP) -> list[Path]:
+    found = []
+    for z in iter_rapl_zones(root):
+        if _zone_name(z).lower().startswith("package"):
+            found.append(z)
+    return found
+
+
 def package_zone(root: Path = POWERCAP) -> Path | None:
-    zones = iter_rapl_zones(root)
-    if not zones:
-        return None
-    for z in zones:
-        name = _zone_name(z).lower()
-        if name.startswith("package"):
-            return z
-    # Kernel usually numbers the package as intel-rapl:0
+    zones = package_zones(root)
     for z in zones:
         if z.name == "intel-rapl:0":
             return z
-    return zones[0]
+    if zones:
+        return zones[0]
+    all_z = iter_rapl_zones(root)
+    for z in all_z:
+        if z.name == "intel-rapl:0":
+            return z
+    return all_z[0] if all_z else None
 
 
 def constraint_indices(zone: Path) -> list[int]:
@@ -179,6 +204,14 @@ def pick_pl1_pl2(zone: Path) -> tuple[dict, dict | None]:
     if pl2 is pl1:
         pl2 = None
     return pl1, pl2
+
+
+def pick_pl4(zone: Path) -> dict | None:
+    for i in constraint_indices(zone):
+        c = read_constraint(zone, i)
+        if c["name"] == "peak_power":
+            return c
+    return None
 
 
 def uw_to_w(uw: int | None) -> int | None:
@@ -227,12 +260,21 @@ def write_limit_uw(zone: Path, idx: int, uw: int) -> None:
         )
 
 
-def apply_watts(zone: Path, watts: int, max_w: int, pl2_headroom: int = PL2_HEADROOM_W) -> int:
-    """Set package PL1 to watts and PL2 a little above. Returns the PL1 watts written.
+def apply_watts(
+    zone: Path,
+    watts: int,
+    max_w: int,
+    pl2_headroom: int = PL2_HEADROOM_W,
+    pl4_w: int | None = None,
+) -> int:
+    """Set package PL1, PL2 a little above, and PL4 (peak_power).
 
     Do not treat sysfs max_power_uw as a hard cap. On live X2 Mini, long_term
     max reads 25 W while a 40 W write still sticks. Clamp only to the Steam
     slider range (max_w). If the kernel rejects the write, retry at sysfs max.
+
+    PL4 defaults to OneXConsole 160 W. BIOS peak_power 55 W trips Xe reason_pl4
+    and holds GT at ~1.4 GHz while GuC requests 2.3 GHz.
     """
     if zone_enabled(zone) is False:
         set_zone_enabled(zone, True)
@@ -263,7 +305,45 @@ def apply_watts(zone: Path, watts: int, max_w: int, pl2_headroom: int = PL2_HEAD
             write_limit_uw(zone, pl2["index"], w_to_uw(pl2_w))
         except (OSError, RuntimeError) as e:
             print(f"PL2 write skipped: {e}", file=sys.stderr)
+    peak = pick_pl4(zone)
+    if peak is not None:
+        target = pl4_w if pl4_w is not None else DEFAULT_PL4_W
+        target = max(watts, int(target))
+        tried = []
+        for cand in (target, *PL4_FALLBACKS):
+            if cand in tried or cand < watts:
+                continue
+            tried.append(cand)
+            try:
+                write_limit_uw(zone, peak["index"], w_to_uw(cand))
+                if cand != target:
+                    print(f"PL4 {target} W rejected; wrote {cand} W", flush=True)
+                break
+            except (OSError, RuntimeError) as e:
+                print(f"PL4 {cand} W skipped: {e}", file=sys.stderr)
     return watts
+
+
+def apply_package_watts(watts: int, max_w: int, pl4_w: int | None = None) -> int:
+    """Write PL1/PL2/PL4 on every package RAPL zone (MSR + MMIO)."""
+    zones = package_zones()
+    if not zones:
+        z = package_zone()
+        zones = [z] if z is not None else []
+    if not zones:
+        raise RuntimeError("no intel-rapl package zone")
+    last = watts
+    for z in zones:
+        last = apply_watts(z, watts, max_w, pl4_w=pl4_w)
+        print(f"wrote {z.name} PL1={last} W", flush=True)
+    return last
+
+
+def pl4_for_product(product: str) -> int:
+    env = os.environ.get("OXP_TDP_PL4", "").strip()
+    if env.isdigit():
+        return int(env)
+    return PRODUCT_PL4.get(product, DEFAULT_PL4_W)
 
 
 def current_pl1_watts(zone: Path) -> int | None:
@@ -378,17 +458,23 @@ def run_self_test() -> int:
     # Live X2 Mini: sysfs max=25 W must not block a 40 W write that sticks.
     (z / "constraint_0_max_power_uw").write_text("25000000\n")
     (z / "constraint_1_max_power_uw").write_text("0\n")
-    wrote = apply_watts(z, 40, 45)
+    (z / "constraint_2_name").write_text("peak_power\n")
+    (z / "constraint_2_power_limit_uw").write_text("55000000\n")
+    (z / "constraint_2_max_power_uw").write_text("0\n")
+    wrote = apply_watts(z, 40, 45, pl4_w=160)
     assert wrote == 40, wrote
     assert _read_text(z / "constraint_0_power_limit_uw") == "40000000"
     assert _read_text(z / "constraint_1_power_limit_uw") == "45000000"
+    assert _read_text(z / "constraint_2_power_limit_uw") == "160000000"
     for name in ("TdpLimit", "TdpLimitMin", "TdpLimitMax", PROPS_IFACE, IFACE):
         assert name in INTROSPECT_XML, name
     print("self-test ok")
     return 0
 
 
-def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
+def serve_dbus(
+    zone: Path, min_w: int, max_w: int, current_w: int, pl4_w: int = DEFAULT_PL4_W
+) -> None:
     import dbus
     import dbus.exceptions
     import dbus.mainloop.glib
@@ -410,8 +496,8 @@ def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
 
         def _set_tdp(self, watts: int) -> None:
             watts = clamp_w(int(watts), self.min_w, self.max_w)
-            self.cur_w = apply_watts(zone, watts, self.max_w)
-            print(f"TDP -> {self.cur_w} W (PL1)", flush=True)
+            self.cur_w = apply_package_watts(watts, self.max_w, pl4_w=pl4_w)
+            print(f"TDP -> {self.cur_w} W (PL1) PL4={pl4_w} W", flush=True)
 
         def _refresh_from_sysfs(self) -> None:
             cur = current_pl1_watts(zone)
@@ -550,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.set is not None:
         w = clamp_w(args.set, min_w, max_w)
-        wrote = apply_watts(zone, w, max_w)
+        wrote = apply_package_watts(w, max_w, pl4_w=pl4_for_product(product))
         print(f"wrote PL1={wrote} W")
         print(dump_rapl(), end="")
         return 0
@@ -560,6 +646,12 @@ def main(argv: list[str] | None = None) -> int:
         current_w = default_w
     else:
         current_w = cur
+
+    pl4_w = pl4_for_product(product)
+    try:
+        apply_package_watts(current_w, max_w, pl4_w=pl4_w)
+    except (OSError, RuntimeError) as e:
+        print(f"initial RAPL apply: {e}", file=sys.stderr)
 
     wait = not args.no_wait_manager and os.environ.get("OXP_TDP_WAIT_MANAGER", "1") != "0"
     # 0 = wait forever so a boot-time start cannot own the name before login.
@@ -579,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     try:
-        serve_dbus(zone, min_w, max_w, current_w)
+        serve_dbus(zone, min_w, max_w, current_w, pl4_w=pl4_w)
     except KeyboardInterrupt:
         return 0
     return 0
