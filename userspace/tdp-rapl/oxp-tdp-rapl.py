@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""steamos-manager TdpLimit1 remote that writes Intel RAPL PL1/PL2.
+
+Steam hides the TDP slider until TdpLimit1 exists on the session bus.
+This process owns a system-bus name; remotes.d tells steamos-manager to
+relay TdpLimit1 here. Watts go to powercap intel-rapl, not oxp-wmi / EC.
+
+Not a production TDP controller. RAPL enforcement is not proven by this
+file existing — use kmod/scripts/diag-tdp.sh under load.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+POWERCAP = Path("/sys/class/powercap")
+DMI_PRODUCT = Path("/sys/class/dmi/id/product_name")
+DMI_SYS_VENDOR = Path("/sys/class/dmi/id/sys_vendor")
+
+# OneXConsole Intel G3E slider bounds (watts). X2 Mini is live-documented.
+# min is a floor for the Steam slider, not a firmware measurement.
+PRODUCT_WATTS = {
+    "ONEXPLAYER X2Mini": (8, 45, 25),
+    "ONEXPLAYER X2": (8, 40, 25),
+    "ONEXPLAYER X2 EVA": (8, 40, 25),
+    "ONEXPLAYER 3": (8, 40, 25),
+    "ONEXPLAYER Apex Air": (8, 46, 25),
+    "ONEXPLAYER Apex i": (8, 46, 25),
+}
+
+BUS_NAME = "com.steampowered.OxpRapl.Tdp"
+OBJ_PATH = "/com/steampowered/OxpRapl"
+IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
+MANAGER_NAME = "com.steampowered.SteamOSManager1"
+PL2_HEADROOM_W = 5
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace").strip()
+
+
+def dmi_product() -> str:
+    try:
+        return _read_text(DMI_PRODUCT)
+    except OSError:
+        return ""
+
+
+def dmi_sys_vendor() -> str:
+    try:
+        return _read_text(DMI_SYS_VENDOR)
+    except OSError:
+        return ""
+
+
+def watts_for_product(product: str) -> tuple[int, int, int] | None:
+    return PRODUCT_WATTS.get(product)
+
+
+def _zone_name(zone: Path) -> str:
+    try:
+        return _read_text(zone / "name")
+    except OSError:
+        return ""
+
+
+def iter_rapl_zones(root: Path = POWERCAP) -> list[Path]:
+    if not root.is_dir():
+        return []
+    zones = []
+    for p in sorted(root.iterdir()):
+        if p.name.startswith("intel-rapl:") and (p / "name").is_file():
+            zones.append(p)
+    return zones
+
+
+def package_zone(root: Path = POWERCAP) -> Path | None:
+    zones = iter_rapl_zones(root)
+    if not zones:
+        return None
+    for z in zones:
+        name = _zone_name(z).lower()
+        if name.startswith("package"):
+            return z
+    # Kernel usually numbers the package as intel-rapl:0
+    for z in zones:
+        if z.name == "intel-rapl:0":
+            return z
+    return zones[0]
+
+
+def constraint_indices(zone: Path) -> list[int]:
+    found = []
+    for p in zone.glob("constraint_*_name"):
+        try:
+            n = int(p.name.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+        found.append(n)
+    return sorted(set(found))
+
+
+def read_constraint(zone: Path, idx: int) -> dict:
+    def maybe(suffix: str) -> str:
+        f = zone / f"constraint_{idx}_{suffix}"
+        try:
+            return _read_text(f)
+        except OSError:
+            return ""
+
+    name = maybe("name") or f"constraint_{idx}"
+    limit = maybe("power_limit_uw")
+    maximum = maybe("max_power_uw")
+    window = maybe("time_window_us")
+    return {
+        "index": idx,
+        "name": name,
+        "limit_uw": int(limit) if limit.isdigit() else None,
+        "max_uw": int(maximum) if maximum.isdigit() else None,
+        "window_us": int(window) if window.isdigit() else None,
+    }
+
+
+def pick_pl1_pl2(zone: Path) -> tuple[dict, dict | None]:
+    cons = [read_constraint(zone, i) for i in constraint_indices(zone)]
+    if not cons:
+        raise RuntimeError(f"no RAPL constraints under {zone}")
+    by_name = {c["name"]: c for c in cons}
+    pl1 = by_name.get("long_term") or cons[0]
+    pl2 = by_name.get("short_term")
+    if pl2 is pl1:
+        pl2 = None
+    return pl1, pl2
+
+
+def uw_to_w(uw: int | None) -> int | None:
+    if uw is None:
+        return None
+    return int(round(uw / 1_000_000))
+
+
+def w_to_uw(watts: int) -> int:
+    return int(watts) * 1_000_000
+
+
+def clamp_w(watts: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, int(watts)))
+
+
+def zone_enabled(zone: Path) -> bool | None:
+    f = zone / "enabled"
+    if not f.is_file():
+        return None
+    try:
+        return _read_text(f) not in ("0", "")
+    except OSError:
+        return None
+
+
+def set_zone_enabled(zone: Path, on: bool) -> None:
+    f = zone / "enabled"
+    if not f.is_file():
+        return
+    f.write_text("1\n" if on else "0\n", encoding="utf-8")
+
+
+def write_limit_uw(zone: Path, idx: int, uw: int) -> None:
+    path = zone / f"constraint_{idx}_power_limit_uw"
+    path.write_text(f"{uw}\n", encoding="utf-8")
+    time.sleep(0.05)
+    got = _read_text(path)
+    if not got.lstrip("-").isdigit():
+        return
+    got_i = int(got)
+    # RAPL units are often 1/8 W; treat >2 W drift as "did not stick".
+    if abs(got_i - uw) > 2_000_000:
+        raise RuntimeError(
+            f"{path} wrote {uw} but reads back {got} (another daemon may be resetting RAPL)"
+        )
+
+
+def apply_watts(zone: Path, watts: int, max_w: int, pl2_headroom: int = PL2_HEADROOM_W) -> int:
+    """Set package PL1 to watts and PL2 a little above. Returns the PL1 watts written."""
+    if zone_enabled(zone) is False:
+        set_zone_enabled(zone, True)
+    pl1, pl2 = pick_pl1_pl2(zone)
+    pl1_max_w = uw_to_w(pl1.get("max_uw"))
+    cap = max_w
+    if pl1_max_w and pl1_max_w > 0:
+        cap = min(cap, pl1_max_w)
+    if cap < 1:
+        cap = max_w
+    watts = clamp_w(watts, 1, cap)
+    write_limit_uw(zone, pl1["index"], w_to_uw(watts))
+    if pl2 is not None:
+        pl2_max_w = uw_to_w(pl2.get("max_uw")) or cap
+        if pl2_max_w <= 0:
+            pl2_max_w = cap
+        pl2_w = min(pl2_max_w, watts + max(0, pl2_headroom))
+        if pl2_w < watts:
+            pl2_w = watts
+        try:
+            write_limit_uw(zone, pl2["index"], w_to_uw(pl2_w))
+        except OSError as e:
+            print(f"PL2 write skipped: {e}", file=sys.stderr)
+    return watts
+
+
+def current_pl1_watts(zone: Path) -> int | None:
+    pl1, _ = pick_pl1_pl2(zone)
+    return uw_to_w(pl1.get("limit_uw"))
+
+
+def dump_rapl(root: Path = POWERCAP) -> str:
+    lines = []
+    zones = iter_rapl_zones(root)
+    if not zones:
+        return f"no intel-rapl zones under {root}\n"
+    for z in zones:
+        enabled = zone_enabled(z)
+        lines.append(f"{z}  name={_zone_name(z)!r}  enabled={enabled}")
+        for i in constraint_indices(z):
+            c = read_constraint(z, i)
+            lines.append(
+                f"  [{c['index']}] {c['name']}: limit={c['limit_uw']} uW "
+                f"max={c['max_uw']} window={c['window_us']} us"
+            )
+    pkg = package_zone(root)
+    if pkg is not None:
+        lines.append(f"package zone: {pkg}")
+    return "\n".join(lines) + "\n"
+
+
+def energy_watts(zone: Path, seconds: float = 5.0) -> float:
+    f = zone / "energy_uj"
+    e1 = int(_read_text(f))
+    time.sleep(seconds)
+    e2 = int(_read_text(f))
+    return (e2 - e1) / (seconds * 1_000_000.0)
+
+
+def session_bus_addresses() -> list[str]:
+    run = Path("/run/user")
+    if not run.is_dir():
+        return []
+    addrs = []
+    try:
+        ents = list(run.iterdir())
+    except OSError:
+        return []
+    for p in ents:
+        bus = p / "bus"
+        if bus.exists():
+            addrs.append(f"unix:path={bus}")
+    return addrs
+
+
+def manager_on_session_bus() -> bool:
+    import subprocess
+
+    for addr in session_bus_addresses():
+        try:
+            r = subprocess.run(
+                [
+                    "busctl",
+                    f"--address={addr}",
+                    "status",
+                    MANAGER_NAME,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            continue
+        if r.returncode == 0:
+            return True
+    return False
+
+
+def wait_for_steamos_manager(timeout_s: float | None, extra_s: float) -> bool:
+    """Avoid claiming TdpLimit1 before the user daemon is up (upstream deadlock).
+
+    timeout_s is None: wait until the session name appears. Claiming the name
+    first deadlocks steamos-manager 26.3 if this unit starts at boot.
+    """
+    deadline = None if timeout_s is None else time.time() + timeout_s
+    while deadline is None or time.time() < deadline:
+        if manager_on_session_bus():
+            if extra_s > 0:
+                time.sleep(extra_s)
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def run_self_test() -> int:
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="oxp-rapl-"))
+    z = root / "intel-rapl:0"
+    z.mkdir()
+    (z / "name").write_text("package-0\n")
+    (z / "enabled").write_text("1\n")
+    (z / "constraint_0_name").write_text("long_term\n")
+    (z / "constraint_0_power_limit_uw").write_text("15000000\n")
+    (z / "constraint_0_max_power_uw").write_text("45000000\n")
+    (z / "constraint_1_name").write_text("short_term\n")
+    (z / "constraint_1_power_limit_uw").write_text("20000000\n")
+    (z / "constraint_1_max_power_uw").write_text("46000000\n")
+    pkg = package_zone(root)
+    assert pkg == z, pkg
+    pl1, pl2 = pick_pl1_pl2(z)
+    assert pl1["name"] == "long_term" and pl1["index"] == 0
+    assert pl2 is not None and pl2["name"] == "short_term"
+    wrote = apply_watts(z, 25, 45)
+    assert wrote == 25
+    assert _read_text(z / "constraint_0_power_limit_uw") == "25000000"
+    assert _read_text(z / "constraint_1_power_limit_uw") == "30000000"
+    print("self-test ok")
+    return 0
+
+
+def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
+    import dbus
+    import dbus.mainloop.glib
+    import dbus.service
+    from gi.repository import GLib
+
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+
+    class TdpLimit1(dbus.service.Object):
+        def __init__(self):
+            super().__init__(bus, OBJ_PATH)
+            self.min_w = min_w
+            self.max_w = max_w
+            self.cur_w = current_w
+
+        def _set_tdp(self, watts: int) -> None:
+            watts = clamp_w(int(watts), self.min_w, self.max_w)
+            self.cur_w = apply_watts(zone, watts, self.max_w)
+            print(f"TDP -> {self.cur_w} W (PL1)", flush=True)
+
+        @dbus.service.property(IFACE, signature="u")
+        def TdpLimit(self):
+            return dbus.UInt32(self.cur_w)
+
+        @TdpLimit.setter
+        def TdpLimit(self, value):
+            self._set_tdp(int(value))
+
+        @dbus.service.property(IFACE, signature="u")
+        def TdpLimitMin(self):
+            return dbus.UInt32(self.min_w)
+
+        @dbus.service.property(IFACE, signature="u")
+        def TdpLimitMax(self):
+            return dbus.UInt32(self.max_w)
+
+    TdpLimit1()
+    bus.request_name(BUS_NAME)
+    print(
+        f"TdpLimit1 on {BUS_NAME} {OBJ_PATH} "
+        f"min={min_w} max={max_w} current={current_w}",
+        flush=True,
+    )
+    GLib.MainLoop().run()
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    p.add_argument("--dump", action="store_true", help="print RAPL sysfs and exit")
+    p.add_argument("--set", type=int, metavar="W", help="write package PL1/PL2 (watts) and exit")
+    p.add_argument("--measure", type=float, metavar="SEC", help="with --dump, also sample energy_uj")
+    p.add_argument("--self-test", action="store_true", help="fake sysfs unit check")
+    p.add_argument(
+        "--no-wait-manager",
+        action="store_true",
+        help="do not wait for steamos-manager before taking the bus name",
+    )
+    args = p.parse_args(argv)
+
+    if args.self_test:
+        return run_self_test()
+
+    product = dmi_product()
+    vendor = dmi_sys_vendor()
+    force = os.environ.get("OXP_TDP_FORCE", "0") == "1"
+    bounds = watts_for_product(product)
+    if bounds is None and not force:
+        print(
+            f"refusing: product {product!r} is not an Intel G3E row "
+            f"(vendor={vendor!r}). Set OXP_TDP_FORCE=1 to override.",
+            file=sys.stderr,
+        )
+        return 2
+    if bounds is None:
+        bounds = (8, 45, 25)
+        print(f"OXP_TDP_FORCE: using generic Intel bounds {bounds} for {product!r}", flush=True)
+
+    min_w, max_w, default_w = bounds
+    print(dump_rapl(), end="")
+    if args.dump and not args.set:
+        zone = package_zone()
+        if args.measure and zone is not None:
+            try:
+                w = energy_watts(zone, args.measure)
+                print(f"package ~ {w:.1f} W over {args.measure}s")
+            except OSError as e:
+                print(f"energy_uj: {e}", file=sys.stderr)
+        return 0
+
+    zone = package_zone()
+    if zone is None:
+        print("no intel-rapl package zone", file=sys.stderr)
+        return 3
+
+    if args.set is not None:
+        w = clamp_w(args.set, min_w, max_w)
+        wrote = apply_watts(zone, w, max_w)
+        print(f"wrote PL1={wrote} W")
+        print(dump_rapl(), end="")
+        return 0
+
+    cur = current_pl1_watts(zone)
+    if cur is None or cur < min_w or cur > max_w:
+        current_w = default_w
+    else:
+        current_w = cur
+
+    wait = not args.no_wait_manager and os.environ.get("OXP_TDP_WAIT_MANAGER", "1") != "0"
+    # 0 = wait forever so a boot-time start cannot own the name before login.
+    timeout_env = os.environ.get("OXP_TDP_WAIT_TIMEOUT", "0")
+    try:
+        t = float(timeout_env)
+        timeout: float | None = None if t <= 0 else t
+    except ValueError:
+        timeout = None
+    extra = float(os.environ.get("OXP_TDP_WAIT_EXTRA", "3"))
+    if wait:
+        print("waiting for session steamos-manager before claiming TdpLimit1...", flush=True)
+        if not wait_for_steamos_manager(timeout, extra):
+            print(
+                f"steamos-manager not seen after {timeout}s; claiming the name anyway",
+                flush=True,
+            )
+
+    try:
+        serve_dbus(zone, min_w, max_w, current_w)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -48,6 +48,7 @@ if [[ "$STACK" == oxp-wmi ]]; then
   "${ROOT}/kmod/scripts/build.sh" oxp-wmi
   "${ROOT}/kmod/scripts/install-oxp-wmi.sh"
   "${ROOT}/kmod/scripts/test-oxp-wmi.sh" "${ROOT}/linux/oxp-wmi/oxp-wmi.ko"
+  "${ROOT}/kmod/scripts/install-tdp-rapl.sh"
   exit 0
 fi
 

@@ -115,7 +115,7 @@ push_repo() {
     fi
     tar -C "${ROOT}" "${tar_ex[@]}" -czf - . | ssh_r "$HOST" "tar -xzf - -C ${REMOTE_ABS}"
   fi
-  ssh_r "$HOST" "chmod +x ${REMOTE_ABS}/kmod/scripts/*.sh ${REMOTE_ABS}/kmod/scripts/*.py"
+  ssh_r "$HOST" "chmod +x ${REMOTE_ABS}/kmod/scripts/*.sh ${REMOTE_ABS}/kmod/scripts/*.py ${REMOTE_ABS}/userspace/tdp-rapl/*.py"
   echo "copied to ${HOST}:${REMOTE_ABS}"
 }
 

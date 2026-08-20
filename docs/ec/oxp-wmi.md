@@ -35,6 +35,7 @@ kmod/scripts/apply-all.sh                 # make linux/oxp-wmi/oxp-wmi.ko
 sudo kmod/scripts/test-oxp-wmi.sh
 sudo kmod/scripts/install-oxp-wmi.sh      # /var/lib/oxp-kmod + systemd
 sudo kmod/scripts/install-inputplumber.sh
+sudo kmod/scripts/install-tdp-rapl.sh     # TdpLimit1 → RAPL; no-op on AMD
 ```
 
 CachyOS / Bazzite one-shot (`install-cachyos.sh` / `install-bazzite.sh` / `on-device-install.sh`) detect the stack and take this path automatically.

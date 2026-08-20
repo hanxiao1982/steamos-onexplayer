@@ -101,4 +101,4 @@ WMI driver (Intel / OxpWMI): [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Deploy
 
 Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
 
-TDP = Intel MSR. RGB / rumble / gyro = HID. CPU turbo / clock = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).
+TDP = Intel RAPL (`TdpLimit1` remote), not EC. See [tdp.md](tdp.md). RGB / rumble / gyro = HID. CPU turbo / clock = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).

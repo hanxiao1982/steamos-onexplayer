@@ -1,0 +1,16 @@
+[Unit]
+Description=OneXPlayer Intel RAPL TdpLimit1 for steamos-manager
+After=dbus.service
+# The daemon waits for the user steamos-manager name before claiming
+# com.steampowered.OxpRapl.Tdp (steamos-manager 26.3 remote-load deadlock).
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/oxp-tdp-rapl
+Restart=on-failure
+RestartSec=2
+# RAPL power_limit_uw is root-only.
+User=root
+
+[Install]
+WantedBy=multi-user.target

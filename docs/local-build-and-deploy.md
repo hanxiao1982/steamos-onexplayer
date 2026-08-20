@@ -74,6 +74,7 @@ kmod/scripts/apply-all.sh         # make -C $KDIR M=linux/oxp-wmi
 sudo kmod/scripts/test-oxp-wmi.sh
 sudo kmod/scripts/install-oxp-wmi.sh
 sudo kmod/scripts/install-inputplumber.sh
+sudo kmod/scripts/install-tdp-rapl.sh   # TdpLimit1 → RAPL; see [ec/tdp.md](ec/tdp.md)
 ```
 
 `install-cachyos.sh` / `install-bazzite.sh` / `ssh-handheld.sh … all` take this path automatically. Source is `linux/oxp-wmi/`; no `fetch-oxpec.sh`. See [ec/oxp-wmi.md](ec/oxp-wmi.md).

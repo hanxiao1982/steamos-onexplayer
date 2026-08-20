@@ -377,15 +377,16 @@ CachyOS also needs the new `product_name` in chwd `hwd_product_name_pattern`, or
 
 | Component | Repo | Role |
 | --- | --- | --- |
-| PowerStation | [ShadowBlip/PowerStation](https://github.com/ShadowBlip/PowerStation) | Generic CPU/GPU TDP D-Bus; Bazzite uses it as the backing for Steam sliders |
+| PowerStation | [ShadowBlip/PowerStation](https://github.com/ShadowBlip/PowerStation) | Generic CPU/GPU TDP D-Bus; Bazzite may use it as a Steam slider backend |
 | steamos-manager | [OpenGamingCollective/steamos-manager](https://github.com/OpenGamingCollective/steamos-manager) (CachyOS uses the same family of packages) | Steam client's `TdpLimit1` / `FanControl1` / GPU clocks, etc. |
-| `oxpec` hwmon | Kernel | Actual fan PWM write path |
+| `oxpec` / `oxp_wmi` hwmon | Kernel | Fan PWM. **Not TDP.** |
+| `oxp-tdp-rapl` | this repo `userspace/tdp-rapl/` | Intel G3E: `remotes.d` `TdpLimit1` → RAPL PL1/PL2 |
 
-PowerStation is mainly generic AMD/Intel sysfs, not HHD-style per-model EC tables. New-machine TDP often needs no new YAML if SMU / `amd_pstate` can write; if Steam slider ranges are wrong, check PowerStation DMI platform overrides or steamos-manager device/remote config.
+PowerStation is mainly generic AMD/Intel sysfs, not HHD-style per-model EC tables. A DMI row in `/usr/share/steamos-manager/devices` without `[tdp_limit]` still hides the Steam slider. Live X2 Mini Bazzite had no `X2Mini` device file, empty `remotes.d`, and session `TdpLimit1` missing — see [ec/tdp.md](ec/tdp.md).
 
-Fan curves: first make sure hwmon is up (`oxpec` on AMD, `oxp_wmi` on Intel G3E) and `pwm1` appears. Steam UI fans need steamos-manager implementing `FanControl1` (local or `remotes.d` remote). That is not InputPlumber's job.
+Fan curves: first make sure hwmon is up (`oxpec` on AMD, `oxp_wmi` on Intel G3E) and `pwm1` appears. Steam UI fans need steamos-manager implementing `FanControl1` (local or `remotes.d` remote). That is not InputPlumber's job. `FanControl1` already present ≠ it writes `oxp_wmi`.
 
-Many Intel OXP units never had a reliable Linux TDP interface; HHD also marked them `w/o TDP`. Changing stacks does not magically add one.
+Intel OXP TDP is RAPL/MSR, not EC. HHD also marked many Intel units `w/o TDP`. The RAPL remote is the fill until a distro device.toml / PowerStation path actually advertises `TdpLimit1`.
 
 ### 4.5 HHD as historical reference only (latest images do not need changes)
 
@@ -417,7 +418,7 @@ Do these in dependency order so you do not change only one side.
    - CachyOS: add `product_name` to the regex in chwd `handhelds/profiles.toml`
 6. **TDP / fans (not InputPlumber)**
    - Fans: get hwmon first (`oxpec` or `oxp_wmi`); then confirm steamos-manager `FanControl1`
-   - TDP: PowerStation + steamos-manager; on AMD confirm SMU is writable. Most Intel still have no TDP
+   - TDP: Steam slider is `TdpLimit1`. AMD: SMU / PowerStation. Intel G3E: this repo's RAPL remote (`install-tdp-rapl.sh`), not EC
 
 ---
 
