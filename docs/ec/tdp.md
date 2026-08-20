@@ -109,8 +109,34 @@ deadlock).
 
 - GPU clock slider (`GpuPerformanceLevel1`) — X2 Mini Windows UI has no manual
   GPU clock; leave it hidden unless a later remote is added on a **second**
-  bus name.
+  bus name. Raising RAPL PL1 to 45 W does **not** by itself tell Xe GuC/PCODE
+  to boost GT to the 2.3 GHz spec. Overlay stuck at ~1.5 GHz with package
+  ~15 W is that gap, not a failed PL1 write.
 - Fan (`FanControl1` is already on the bus on the live unit; wiring it to
   `oxp_wmi` pwm is a separate job).
 - PL4 / adapter-class tables (`0xE3`).
 - `oxp-wmi` / EC `0xED`.
+
+## If games stay ~15 W with GPU ≤ 1.5 GHz
+
+Arc G3 Extreme (B390) spec boost is **2.3 GHz**. RAPL PL1 is a *ceiling*,
+not a floor: if GT never asks for more clocks, package power stays around
+15 W even when `constraint_0` reads 45 W.
+
+During the same game, as root:
+
+```bash
+sudo kmod/scripts/diag-tdp.sh --measure 5
+sudo kmod/scripts/diag-gpu.sh
+```
+
+| What you see | Meaning |
+|---|---|
+| `max_freq` (or `gt_max_freq_mhz`) ≈ 1500, `rp0` ≈ 2300 | Linux GT max request is capped; try `sudo kmod/scripts/diag-gpu.sh --raise-max` |
+| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/*` set | PCODE / thermal / another powercap is holding GT |
+| A **non-** `intel-rapl:0` powercap zone still at ~15 W | `processor_thermal_rapl` / DPTF, not our TdpLimit1 writer |
+| Overlay 15 W but `diag-tdp.sh --measure` much higher | Overlay telemetry (often `energy_uj` 0400 or i915/xe), not package RAPL |
+
+Windows OneXConsole writes MSR PL + Intel DTT/graphics policy (`intelTdpSetType=4`).
+This remote only writes powercap sysfs. Overlay CPU watts are often 0 on this
+unit because `energy_uj` is root-only.
