@@ -1,8 +1,9 @@
 [Unit]
 Description=OneXPlayer Intel RAPL TdpLimit1 for steamos-manager
 After=dbus.service
-# The daemon waits for the user steamos-manager name before claiming
-# com.steampowered.OxpRapl.Tdp (steamos-manager 26.3 remote-load deadlock).
+# Do not claim com.steampowered.OxpRapl.Tdp until a *non-root*
+# steamos-manager exists (26.3 deadlocks if the name is owned at user-daemon
+# start). Detection is via /proc; root cannot query the session bus.
 
 [Service]
 Type=simple

@@ -34,7 +34,6 @@ PRODUCT_WATTS = {
 BUS_NAME = "com.steampowered.OxpRapl.Tdp"
 OBJ_PATH = "/com/steampowered/OxpRapl"
 IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
-MANAGER_NAME = "com.steampowered.SteamOSManager1"
 PL2_HEADROOM_W = 5
 
 
@@ -242,57 +241,55 @@ def energy_watts(zone: Path, seconds: float = 5.0) -> float:
     return (e2 - e1) / (seconds * 1_000_000.0)
 
 
-def session_bus_addresses() -> list[str]:
-    run = Path("/run/user")
-    if not run.is_dir():
-        return []
-    addrs = []
+def user_steamos_manager_running() -> bool:
+    """True when a non-root steamos-manager exists.
+
+    The root helper also named steamos-manager starts at boot. Claiming the
+    TdpLimit1 remote before the *user* daemon is up deadlocks 26.3. Root
+    usually cannot query the session bus (dbus-broker uid policy), so detect
+    the user process via /proc instead.
+    """
+    proc = Path("/proc")
     try:
-        ents = list(run.iterdir())
+        ents = list(proc.iterdir())
     except OSError:
-        return []
+        return False
     for p in ents:
-        bus = p / "bus"
-        if bus.exists():
-            addrs.append(f"unix:path={bus}")
-    return addrs
-
-
-def manager_on_session_bus() -> bool:
-    import subprocess
-
-    for addr in session_bus_addresses():
+        if not p.name.isdigit():
+            continue
         try:
-            r = subprocess.run(
-                [
-                    "busctl",
-                    f"--address={addr}",
-                    "status",
-                    MANAGER_NAME,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            comm = (p / "comm").read_text(encoding="utf-8", errors="replace").strip()
         except OSError:
             continue
-        if r.returncode == 0:
-            return True
+        # TASK_COMM_LEN is 16 bytes including NUL; "steamos-manager" is 15 chars.
+        if comm != "steamos-manager":
+            continue
+        try:
+            for line in (p / "status").read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("Uid:"):
+                    parts = line.split()
+                    euid = int(parts[2]) if len(parts) >= 3 else 0
+                    if euid != 0:
+                        return True
+                    break
+        except (OSError, ValueError, IndexError):
+            continue
     return False
 
 
 def wait_for_steamos_manager(timeout_s: float | None, extra_s: float) -> bool:
-    """Avoid claiming TdpLimit1 before the user daemon is up (upstream deadlock).
-
-    timeout_s is None: wait until the session name appears. Claiming the name
-    first deadlocks steamos-manager 26.3 if this unit starts at boot.
-    """
+    """Avoid claiming TdpLimit1 before the user daemon is up (upstream deadlock)."""
     deadline = None if timeout_s is None else time.time() + timeout_s
+    last_log = 0.0
     while deadline is None or time.time() < deadline:
-        if manager_on_session_bus():
+        if user_steamos_manager_running():
             if extra_s > 0:
                 time.sleep(extra_s)
             return True
+        now = time.time()
+        if now - last_log >= 15:
+            print("still waiting for non-root steamos-manager...", flush=True)
+            last_log = now
         time.sleep(0.5)
     return False
 
@@ -362,7 +359,10 @@ def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
             return dbus.UInt32(self.max_w)
 
     TdpLimit1()
-    bus.request_name(BUS_NAME)
+    # 1 = DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
+    reply = int(bus.request_name(BUS_NAME))
+    if reply not in (1, 4):
+        raise RuntimeError(f"could not own {BUS_NAME} (request_name={reply})")
     print(
         f"TdpLimit1 on {BUS_NAME} {OBJ_PATH} "
         f"min={min_w} max={max_w} current={current_w}",
@@ -442,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout = None
     extra = float(os.environ.get("OXP_TDP_WAIT_EXTRA", "3"))
     if wait:
-        print("waiting for session steamos-manager before claiming TdpLimit1...", flush=True)
+        print("waiting for non-root steamos-manager (/proc) before claiming TdpLimit1...", flush=True)
         if not wait_for_steamos_manager(timeout, extra):
             print(
                 f"steamos-manager not seen after {timeout}s; claiming the name anyway",

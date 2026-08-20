@@ -28,7 +28,8 @@ if busctl --system status com.steampowered.OxpRapl.Tdp >/dev/null 2>&1; then
   busctl --system introspect com.steampowered.OxpRapl.Tdp /com/steampowered/OxpRapl \
     com.steampowered.SteamOSManager1.TdpLimit1
 else
-  echo "OxpRapl.Tdp not on the system bus yet (normal until steamos-manager appears, or install not run)"
+  echo "OxpRapl.Tdp not on the system bus (service waiting, failed, or not installed)"
+  echo "  journalctl -u oxp-tdp-rapl -n 40 --no-pager"
 fi
 
 echo "=== session TdpLimit1 ==="
@@ -40,6 +41,8 @@ if busctl --user status com.steampowered.SteamOSManager1 >/dev/null 2>&1; then
       /com/steampowered/SteamOSManager1 | grep -E "TdpLimit|RemoteInterfaces"
   else
     echo "SteamOSManager1 is up but TdpLimit1 is still missing" >&2
+    echo "If RemoteInterfaces is 0: sudo ${ROOT}/kmod/scripts/reload-tdp-rapl.sh" >&2
+    echo "Then: busctl --system status com.steampowered.OxpRapl.Tdp" >&2
     fail=1
   fi
 else

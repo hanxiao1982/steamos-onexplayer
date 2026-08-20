@@ -54,17 +54,44 @@ kmod/scripts/test-tdp-rapl.sh
 `on-device-install.sh` / `ssh-handheld.sh … all` also run this and **no-op** on
 AMD / unknown DMI unless `OXP_TDP_FORCE=1`.
 
-The daemon waits until session `steamos-manager` is up before taking the
-system bus name (a remote already present at user-daemon start can deadlock
-steamos-manager 26.3). Fully restart Steam after `TdpLimit1` shows on the
-session bus.
+A new `remotes.d` file is **not** picked up by an already-running user
+`steamos-manager`. `RemoteInterfaces` staying `0` after install is that, not
+a missing DMI match. 26.3 also deadlocks if `OxpRapl.Tdp` is already owned
+when the user daemon starts. `install-tdp-rapl.sh` therefore runs
+`reload-tdp-rapl.sh`: stop remote → restart user manager → start remote.
+
+If the slider is still missing, as the **session user**:
 
 ```bash
+ls -l /etc/steamos-manager/remotes.d/
+systemctl --no-pager --full status oxp-tdp-rapl.service
+journalctl -u oxp-tdp-rapl -n 40 --no-pager
+busctl --system status com.steampowered.OxpRapl.Tdp
+
+# if oxp-rapl.toml is present, attach it (pull this repo first so the
+# daemon waits via /proc, not session busctl as root):
+sudo kmod/scripts/reload-tdp-rapl.sh
+
+# same sequence by hand:
+sudo systemctl stop oxp-tdp-rapl.service
+systemctl --user restart steamos-manager.service
+sleep 4
+sudo systemctl start oxp-tdp-rapl.service
+sleep 2
+busctl --system status com.steampowered.OxpRapl.Tdp
 busctl --user introspect com.steampowered.SteamOSManager1 \
   /com/steampowered/SteamOSManager1 | grep -E "TdpLimit1|RemoteInterfaces"
 ```
 
 `RemoteInterfaces` should list `com.steampowered.SteamOSManager1.TdpLimit1`.
+Then fully restart Steam. Do not `sudo busctl --user` — that is a different
+bus.
+
+If `oxp-tdp-rapl` stays in `waiting for session steamos-manager` in the
+journal, it is the old binary (root `busctl` against the session bus). Pull
+and reinstall, or start once with `OXP_TDP_WAIT_MANAGER=0` **after** the
+user manager is already up (do not leave that env on across reboot — 26.3
+deadlock).
 
 ## What this does not do
 

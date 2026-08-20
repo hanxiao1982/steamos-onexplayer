@@ -64,12 +64,23 @@ else
 fi
 
 systemctl daemon-reload
-systemctl enable --now oxp-tdp-rapl.service
-systemctl --no-pager --full status oxp-tdp-rapl.service || true
+systemctl enable oxp-tdp-rapl.service
+# Do not enable --now: a new remotes.d file is ignored until the *user*
+# steamos-manager restarts, and owning the name during that restart deadlocks
+# 26.3. reload-tdp-rapl.sh does: stop remote → restart manager → start remote.
+if [[ "${OXP_TDP_SKIP_RELOAD:-0}" == 1 ]]; then
+  echo "installed files only (OXP_TDP_SKIP_RELOAD=1). Run:"
+  echo "  sudo ${ROOT}/kmod/scripts/reload-tdp-rapl.sh"
+else
+  "${ROOT}/kmod/scripts/reload-tdp-rapl.sh" || {
+    echo "files are installed; finish with: sudo ${ROOT}/kmod/scripts/reload-tdp-rapl.sh" >&2
+    exit 0
+  }
+fi
 
 echo "installed TdpLimit1 RAPL remote:"
 echo "  $BIN_DEST"
 echo "  $UNIT"
 echo "  $REMOTE_TOML"
-echo "Restart Steam after steamos-manager has picked up TdpLimit1:"
-echo "  busctl --user introspect ${MANAGER:-com.steampowered.SteamOSManager1} /com/steampowered/SteamOSManager1 | grep TdpLimit1"
+echo "If RemoteInterfaces is still empty, run: sudo ${ROOT}/kmod/scripts/reload-tdp-rapl.sh"
+echo "Then fully restart Steam."
