@@ -114,9 +114,8 @@ deadlock).
   ~15 W is that gap, not a failed PL1 write.
 - Fan (`FanControl1` is already on the bus on the live unit; wiring it to
   `oxp_wmi` pwm is a separate job).
-- PL4 / adapter-class tables (`0xE3`) beyond the OneXConsole 160/120/65 W peak
-  values. The remote writes PL4=160 W (key 1–5) so Xe `reason_pl4` can clear;
-  it does not yet read EC `0xE3` to pick 120/65.
+- PL4 / adapter-class tables (`0xE3`). PL4 is interpolated 70–160 W from the
+  TDP slider, not read from EC. 65 W adapter (OneXConsole key 8) is not applied.
 - `oxp-wmi` / EC `0xED`.
 
 ## If games stay ~15 W with GPU ≤ 1.5 GHz
@@ -135,7 +134,7 @@ sudo kmod/scripts/diag-gpu.sh
 | What you see | Meaning |
 |---|---|
 | `max_freq` (or `gt_max_freq_mhz`) ≈ 1500, `rp0` ≈ 2300 | Linux GT max request is capped; try `sudo kmod/scripts/diag-gpu.sh --raise-max` |
-| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 / IccMax.** Live X2 Mini: GuC `cur_freq=2300`, `act_freq=1400`, BIOS `peak_power=55 W`. OneXConsole sets PL4 **160 W** (keys 1–5). The RAPL remote now writes `peak_power` to 160 W on both MSR and MMIO package zones. |
+| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 too low** (BIOS 55 W). At **45 W** TDP, PL4 should be ~160 W. Do not leave PL4 at 160 W for every slider position. |
 | A **non-** `intel-rapl:0` powercap zone still at ~15 W | `processor_thermal_rapl` / DPTF, not our TdpLimit1 writer |
 | Overlay 15 W but `diag-tdp.sh --measure` much higher | Overlay telemetry (often `energy_uj` 0400 or i915/xe), not package RAPL |
 
@@ -144,7 +143,10 @@ This remote only writes powercap sysfs. Overlay CPU watts are often 0 on this
 unit because `energy_uj` is root-only.
 
 Live X2 Mini (same game, PL1 already 45 W): BIOS PL4 55 W → `act_freq=1400`,
-`reason_pl4=1`, package ~14.8 W. After writing `peak_power=160 W` on MSR and
-MMIO: `act_freq=2300`, `reasons=none`, package ~32.6 W, CPU ~2.3 GHz. Reboot
-restores 55 W unless `oxp-tdp-rapl` is installed (it writes PL4=160 on start
-and on each `TdpLimit` set).
+`reason_pl4=1`, package ~14.8 W. Writing `peak_power=160 W` cleared the clip
+(`act_freq=2300`, ~32.6 W) but that is only the **top** of the slider — a
+constant 160 W lets GuC sit at RP0. The remote now interpolates PL4 70–160 W
+and GT0 `max_freq` RPe→RP0 with TDP, and **always** sets `min_freq=RPe`
+(Xe `max<=min` would pin a single clock). At 45 W under load, 2.3 GHz is
+boost; desktop/idle `act_freq` should fall toward ~1.0 GHz. Reboot restores
+BIOS 55 W PL4 unless `oxp-tdp-rapl` is installed.

@@ -155,8 +155,14 @@ if [[ -n "$SET_W" ]]; then
     pl2w=$((SET_W + 5))
     printf '%s\n' $((pl2w * 1000000)) | tee "$pl2" >/dev/null || echo "PL2 write failed"
   fi
-  # OneXConsole key 1–5 → PL4 160 W. BIOS 55 W trips Xe reason_pl4.
-  pl4w="${OXP_TDP_PL4:-160}"
+  # PL4 70–160 W across 8–45 W. Constant 160 W lets GT sit at 2.3 GHz.
+  if [[ -z "${OXP_TDP_PL4:-}" ]]; then
+    pl4w=$((70 + (SET_W - 8) * 90 / 37))
+    if [[ "$pl4w" -lt 70 ]]; then pl4w=70; fi
+    if [[ "$pl4w" -gt 160 ]]; then pl4w=160; fi
+  else
+    pl4w="${OXP_TDP_PL4}"
+  fi
   for pkg in "$PKG" /sys/class/powercap/intel-rapl-mmio:0; do
     [[ -d "$pkg" ]] || continue
     peak=""
