@@ -190,6 +190,31 @@ mode” / Adaptive TDP; those POSTs are **not** in the extracted table —
 capture them on 1013 before inventing paths. See
 [tdp.md — CPU vs GPU split](tdp.md#cpu-vs-gpu-split-not-pl1).
 
+### Polling gets while moving the TDP slider
+
+That does **not** replace a POST capture if you want the **path**. The
+extracted UriTemplates have `setCpuPl` / `setCpuPl4`, not `getCpuPl`.
+OneXConsole “get” routes are still **POST**, and the ones we have are EC:
+
+| You poll | Moves with the TDP slider? |
+|---|---|
+| `/func/getOXPSetTdpAble` | **No.** `0xED` stays 0. |
+| `/func/getOXPSensorInfo` / `getOXPSensorCpuTemp` | Only temps / leftover sensor bytes. |
+| `/fan/getFanSpeed` | Only if the fan curve also changes. |
+| `/battery/getPowerSupplyMode` | Only if the adapter/`0xE3` class changes. |
+
+So: HTTP get → move slider → HTTP get will look identical for TDP.
+
+To see **hardware** change without capturing POSTs, read RAPL / IA / GT
+outside OneXConsole (HWiNFO, Intel XTU, ThrottleStop: Package PL1/PL2/PL4,
+IA power, GT power) at the same load, then move the slider. That answers
+“what watts/split changed”. It does **not** show extra DTT / powerplan
+routes. For those, still capture 1013 or dump UriTemplates.
+
+Probing `POST /msr/getCpuPl` (or `/tdp/get`) is optional; it was not in
+the 0.10.2-fix8 string table. A non-`code==1` reply means it is not
+there — do not treat that as a new API.
+
 There is **no** tau / `time_window` / `long_term` argument on these routes.
 `setCpuPl` writes watts (and, inside CompatLayerCT, the usual RAPL
 clamp-enable bits). Firmware PL1 window stays at the BIOS default
