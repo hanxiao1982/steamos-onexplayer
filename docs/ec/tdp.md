@@ -79,15 +79,82 @@ because they set a 2 s window.
 daemon only restores ~28 s if a previous build left a 2 s leftover.
 `OXP_TDP_PL1_WINDOW_US` is an explicit diag override, not the default.
 
-**Not replicable without Windows DTT:** SoC slider
-(`processor_thermal_soc_slider`), GuC idle-down under Game Mode, and
-whatever mailbox type 4 uses besides package watts. Shortening tau on
-Linux only makes a 10 s `energy_uj` sample look closer to the new cap; it
-is not how OneXConsole works.
+**Not a OneXConsole clone:** shortening tau, or interpolating GT
+`max_freq`, only changes how Linux *looks*. Windows split is DTT, not RAPL
+tau. See [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1) below.
 
 To judge a lower TDP, wait longer than the printed `window=` (about 28 s)
 or use `--measure 30`. A 10 s sample after dropping 45 → 25 W can still
 read above 25 W.
+
+## CPU vs GPU split (not PL1)
+
+Writing the same PL1/PL2/PL4 watts as Windows and still seeing a different
+CPU/GPU split is expected. Package RAPL is the **shared ceiling**. Who
+eats that ceiling is a second policy layer.
+
+### Already in the 0.10.2-fix8 route list (under-used)
+
+| Interface | What it actually does to the split |
+|---|---|
+| `/msr/setCpuPl/{pl1}/{pl2}/{type}` **`type`** | G3E hard-codes `intelTdpSetType=4`. That is **not** “raw MSR PL1”. Type 4 is the Intel DTT / IPF write path. Types other than 4 are not documented here; do not assume 4 ≡ `powercap` `constraint_*_power_limit_uw`. |
+| `/msr/setCpuPl4/{pl4}/{type}` | Peak clamp. Changes how hard GT can burst before `reason_pl4`, not a CPU/GPU ratio. |
+| `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost (OEM “Turbo On”). Boost on → IA takes more of the package; Boost off → leftover goes to GT. Community X1 notes: GPU-bound games want Turbo **off**. |
+| `/powerplan/setCpuMaxClock/{MHz}` | Caps IA max MHz (0 = off). Same idea: clip CPU so GPU can keep the watts. |
+| `/battery/setMaxTdpLimit/{true\|false}` | Lock-to-max-TDP flag. Not a split knob, but it changes which PL table is applied. |
+| `changePl4Func` via EC `0xE3` | Adapter-class PL4 (65 / 120 / 160 W). Burst headroom, not a ratio. |
+
+X2 Mini has **no** `/ryzenadj/setGpuClock` / `manualGpuClk`. There is no
+OneXConsole GPU-MHz slider to copy.
+
+### UI we have **not** mapped to a CompatLayerCT path
+
+These show up in the Intel OneXConsole UI / OEM write-ups. They are **not**
+in the HTTP table we extracted. Capture them on Windows (pipe → HTTP,
+toggle the control, watch 1013):
+
+| UI | Likely backend | Why the split moves |
+|---|---|---|
+| Intel dynamic performance mode (on/off + high perform / balanced) | Intel DTT Adaptive Performance / Power Share | This **is** the CPU↔GPU allocator. Package PL stays; DTT shifts IA vs GT. |
+| Follow FPS / Frame lock / Adaptive TDP | time-varying PL1 (and maybe DTT workload) | Looks like a split change because PL and clocks move with FPS. |
+| Performance presets | bundle of TDP + turbo + DTT + fan | Not a new hardware register. |
+
+Until those POSTs are captured, do not invent `/dtt/…` or `/intel/…`
+routes.
+
+### Behind `type=4` (not an HTTP route)
+
+CompatLayerCT type 4 talks to OEM Intel DTT / IPF. That stack, not RAPL
+sysfs, does Power Share:
+
+- DTT policy tables (OEM, not a public watt argument)
+- Windows power plan / EPP (community notes: DTT “high perform” can force
+  Windows “best power efficiency” — counter-intuitive, do not copy Linux
+  `performance` governor blindly)
+- Intel Graphics / IGCL GPU power policy (no X2 Mini clock slider)
+
+Linux `intel-rapl` PL1/PL2/PL4 does **none** of that. PCODE still shares
+the package, but the OEM DTT bias is missing.
+
+### Linux knobs that *are* the split (dump, do not guess)
+
+On this SKU (Arc B390 / Xe3 / Panther Lake class) the allocator lives
+under the processor thermal device and GuC, not under `oxp-wmi`:
+
+| Sysfs | Role |
+|---|---|
+| `intel-rapl:0:*` child zones (`core` / `uncore` / …) | PP0/PP1-style plane energy. Package PL does not set these. |
+| `intel-rapl-mmio:0` | PCODE-visible package copy (we already write this). |
+| `/sys/bus/pci/devices/0000:00:04.0/power_limits/` | DPTF RAPL legal range (min/max/step), not the share. |
+| `…/workload_request/workload_type` | Hint: idle / bursty / sustained. Changes how firmware spends the package. |
+| `…/workload_hint/` | Firmware’s own classification (Panther Lake adds power vs performance bit). |
+| `processor_thermal_soc_slider` (`slider_balance` / `slider_offset`) | SoC-wide energy-perf hint (0=perf … 6=efficiency). Closest public Linux stand-in for DTT “dynamic performance”. |
+| `/sys/class/platform-profile/*/profile` | Often wired to the same slider. |
+| `intel_pstate` `no_turbo` + `energy_performance_preference` | Linux side of `/powerplan/setCpuBoostMode` + EPP. |
+| Xe `gt*/freq0/power_profile` and `min_freq`/`max_freq` | GuC clock request. Our GT lerp is a **Linux-only** substitute for missing DTT, not an OneXConsole clone. |
+
+`sudo kmod/scripts/diag-gpu.sh` dumps these. Compare a Windows capture of
+the DTT / powerplan POSTs against that dump before writing any of them.
 
 Live `ONEXPLAYER X2Mini` (Bazzite): package `long_term` `max_power_uw` is 25 W,
 but `diag-tdp.sh --set 40` read back 40 W / 45 W PL1/PL2. That sysfs max is a
@@ -163,6 +230,8 @@ deadlock).
   `oxp_wmi` pwm is a separate job).
 - PL4 / adapter-class tables (`0xE3`). PL4 is interpolated 70–160 W from the
   TDP slider, not read from EC. 65 W adapter (OneXConsole key 8) is not applied.
+- CPU vs GPU **share** (DTT Power Share, `/powerplan/*`, SoC slider). Package
+  PL1 is only the ceiling. See [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1).
 - `oxp-wmi` / EC `0xED`.
 
 ## If games stay ~15 W with GPU ≤ 1.5 GHz

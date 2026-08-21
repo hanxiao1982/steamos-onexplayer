@@ -181,6 +181,15 @@ Changing TDP in the UI does **not** write watts into an EC register. After optio
 
 `/tdp/init/...` only refreshes min/max/boost bounds used by the UI.
 
+Package PL is the ceiling. CPU vs GPU **share** is not a watt field on
+`setCpuPl`. On G3E the extra knobs already in this route list are the
+`{type}` on `/msr/setCpuPl` (`intelTdpSetType=4` = DTT/IPF, not raw RAPL),
+`/powerplan/setCpuBoostMode/{0|2}`, `/powerplan/setCpuMaxClock/{MHz}`,
+and `/battery/setMaxTdpLimit`. The Intel UI also has “dynamic performance
+mode” / Adaptive TDP; those POSTs are **not** in the extracted table —
+capture them on 1013 before inventing paths. See
+[tdp.md — CPU vs GPU split](tdp.md#cpu-vs-gpu-split-not-pl1).
+
 There is **no** tau / `time_window` / `long_term` argument on these routes.
 `setCpuPl` writes watts (and, inside CompatLayerCT, the usual RAPL
 clamp-enable bits). Firmware PL1 window stays at the BIOS default

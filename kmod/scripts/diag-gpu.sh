@@ -112,6 +112,53 @@ done
 shopt -u nullglob
 
 echo
+echo "=== RAPL child zones (core/uncore energy, not package PL) ==="
+shopt -s nullglob
+for d in /sys/class/powercap/intel-rapl:*:* /sys/class/powercap/intel-rapl-mmio:*:*; do
+  [[ -d "$d" && -e "$d/name" ]] || continue
+  printf '%s  name=%s  enabled=%s\n' "$d" "$(tr -d '\n' <"$d/name" 2>/dev/null || echo '?')" \
+    "$(tr -d '\n' <"$d/enabled" 2>/dev/null || echo '?')"
+done
+shopt -u nullglob
+
+echo
+echo "=== processor_thermal (0000:00:04.0) — DTT-ish Linux side ==="
+PT=/sys/bus/pci/devices/0000:00:04.0
+if [[ -d "$PT" ]]; then
+  dump_file "$PT/tcc_offset_degree_celsius"
+  if [[ -d "$PT/power_limits" ]]; then
+    echo "-- $PT/power_limits"
+    for f in "$PT"/power_limits/*; do
+      [[ -f "$f" ]] && dump_file "$f"
+    done
+  fi
+  for sub in workload_request workload_hint; do
+    if [[ -d "$PT/$sub" ]]; then
+      echo "-- $PT/$sub"
+      for f in "$PT/$sub"/*; do
+        [[ -f "$f" ]] && dump_file "$f"
+      done
+    fi
+  done
+else
+  echo "(no $PT)"
+fi
+
+echo
+echo "=== SoC slider / platform-profile ==="
+dump_file /sys/module/processor_thermal_soc_slider/parameters/slider_balance
+dump_file /sys/module/processor_thermal_soc_slider/parameters/slider_offset
+shopt -s nullglob
+for d in /sys/class/platform-profile/platform-profile-*; do
+  [[ -d "$d" ]] || continue
+  echo "-- $d"
+  dump_file "$d/name"
+  dump_file "$d/profile"
+  dump_file "$d/choices"
+done
+shopt -u nullglob
+
+echo
 echo "=== platform_profile / pstate ==="
 dump_file /sys/firmware/acpi/platform_profile
 dump_file /sys/firmware/acpi/platform_profile_choices
