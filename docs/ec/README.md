@@ -40,6 +40,7 @@ Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `o
 - [x2-mini-pro.md](x2-mini-pro.md) — AMD map, source-only (live later)
 - [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
 - [onexconsole-api.md](onexconsole-api.md) — localhost:1013 / named-pipe routes (F12 / proxy)
+- [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md) — full WCF UriTemplate scan of CompatLayerCT.exe 0.10.2-fix8
 - [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
 - [oxp-wmi.md](oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer Intel / OxpWMI)
 - [tdp.md](tdp.md) — Steam `TdpLimit1` / Intel RAPL (not EC)

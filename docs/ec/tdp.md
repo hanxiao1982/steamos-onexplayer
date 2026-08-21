@@ -101,26 +101,24 @@ eats that ceiling is a second policy layer.
 | `/msr/setCpuPl4/{pl4}/{type}` | Peak clamp. Changes how hard GT can burst before `reason_pl4`, not a CPU/GPU ratio. |
 | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost (OEM “Turbo On”). Boost on → IA takes more of the package; Boost off → leftover goes to GT. Community X1 notes: GPU-bound games want Turbo **off**. |
 | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA max MHz (0 = off). Same idea: clip CPU so GPU can keep the watts. |
+| `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` | Intel PnP OEM variable via the power scheme. DTT/Adaptive-Performance-shaped; not package watts. **JS does call this.** |
+| `/power/setCpuMaxStatusPercent/{n}` | In the **exe** UriTemplates, **not** in 0.10.2-fix8 `background.js` invokes. Windows processor-maximum-state (%). Best named CPU↔GPU share knob in the binary. |
+| `/power/setCpuBoostMode/{n}` | Exe-only alias of the powerplan boost write. |
 | `/battery/setMaxTdpLimit/{true\|false}` | Lock-to-max-TDP flag. Not a split knob, but it changes which PL table is applied. |
 | `changePl4Func` via EC `0xE3` | Adapter-class PL4 (65 / 120 / 160 W). Burst headroom, not a ratio. |
 
 X2 Mini has **no** `/ryzenadj/setGpuClock` / `manualGpuClk`. There is no
 OneXConsole GPU-MHz slider to copy.
 
-### UI we have **not** mapped to a CompatLayerCT path
+### UI vs named templates
 
-These show up in the Intel OneXConsole UI / OEM write-ups. They are **not**
-in the HTTP table we extracted. How to grab the POSTs:
+No `/dtt/` or `/xtu/` string in the exe. Candidates for “Intel dynamic
+performance” are the named writes above (`intelpnp/…`,
+`power/setCpuMaxStatusPercent`). Follow FPS / Adaptive TDP is still
+time-varying PL1 (and maybe those same writes). How to confirm which
+POST the slider actually sends:
 [onexconsole-api.md — capture](onexconsole-api.md#how-to-capture-posts-windows).
-
-| UI | Likely backend | Why the split moves |
-|---|---|---|
-| Intel dynamic performance mode (on/off + high perform / balanced) | Intel DTT Adaptive Performance / Power Share | This **is** the CPU↔GPU allocator. Package PL stays; DTT shifts IA vs GT. |
-| Follow FPS / Frame lock / Adaptive TDP | time-varying PL1 (and maybe DTT workload) | Looks like a split change because PL and clocks move with FPS. |
-| Performance presets | bundle of TDP + turbo + DTT + fan | Not a new hardware register. |
-
-Until those POSTs are captured, do not invent `/dtt/…` or `/intel/…`
-routes.
+Full table: [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md).
 
 ### Behind `type=4` (not an HTTP route)
 

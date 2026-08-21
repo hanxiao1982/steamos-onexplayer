@@ -185,9 +185,12 @@ Package PL is the ceiling. CPU vs GPU **share** is not a watt field on
 `setCpuPl`. On G3E the extra knobs already in this route list are the
 `{type}` on `/msr/setCpuPl` (`intelTdpSetType=4` = DTT/IPF, not raw RAPL),
 `/powerplan/setCpuBoostMode/{0|2}`, `/powerplan/setCpuMaxClock/{MHz}`,
-and `/battery/setMaxTdpLimit`. The Intel UI also has “dynamic performance
-mode” / Adaptive TDP; those POSTs are **not** in the extracted table —
-capture them on 1013 before inventing paths. See
+and `/battery/setMaxTdpLimit`. The Intel UI also has “dynamic performance mode” / Adaptive TDP. The exe
+has **no** `/dtt/` template. The named extras are
+`/intelpnp/setOEMVarWithPowerScheme/{oemVar}` (JS calls it) and
+`/power/setCpuMaxStatusPercent/{n}` (exe UriTemplate, not in this JS
+invoke list). Full scan:
+[compatlayerct-uritemplates.md](compatlayerct-uritemplates.md). See
 [tdp.md — CPU vs GPU split](tdp.md#cpu-vs-gpu-split-not-pl1).
 
 ### Polling gets while moving the TDP slider
@@ -322,7 +325,7 @@ One toggle per pcap. Write down: control name, before/after, file name.
 |---|---|
 | TDP slider | `/msr/setCpuPl/`, `/msr/setCpuPl4/`, `/tdp/` |
 | Turbo / CPU boost / max clock | `/powerplan/` |
-| Intel dynamic performance / Adaptive TDP / Follow FPS | **unknown** — keep **every** new `POST /…` that is not fan/battery/RGB. Especially `/msr/`, `/tdp/`, `/func/`, `/intel/`, `/dtt/`, `/ipf/`, `/xtu/` |
+| Intel dynamic performance / Adaptive TDP / Follow FPS | `/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/powerplan/`, `/msr/` — no `/dtt/` in the exe |
 | Fan / charge (sanity) | `/fan/`, `/battery/` — already mapped; use only to prove capture works |
 
 Ignore startup `init*` after the first boot capture. Decode init

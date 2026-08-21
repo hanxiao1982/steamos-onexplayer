@@ -58,7 +58,7 @@ Cross-checked against `background.js` routes. None of these write the G3E EC map
 | TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | Package watts. `{type}=4` is DTT/IPF, not raw RAPL. No tau. `0xED` stays 0. |
 | CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Shifts package share toward IA. Not `0xEB`. |
 | CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA MHz so GT can keep watts. Off → `0`. |
-| Intel dynamic performance / Adaptive TDP | **not captured** | UI exists; HTTP path unknown. This is the CPU↔GPU allocator. |
+| Intel dynamic performance / Adaptive TDP | `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` (JS); `/power/setCpuMaxStatusPercent/{n}` (exe only) | No `/dtt/` template. See [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md). |
 | GPU clock | — | X2 Mini does **not** enable `manualGpuClk` / `gpuClk`. |
 | RGB / LED | `/rgbPartition/setColor\|setOpen\|setPreset` | `rgbPartitionMode`, `CommonHid`. No `EC_ADDR_RGB`. |
 | Rumble / gyro / key mapping | `/programhandle/…`, `/gyro/…`, `/motor/…` | HID. |
