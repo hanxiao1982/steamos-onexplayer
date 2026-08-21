@@ -110,8 +110,8 @@ OneXConsole GPU-MHz slider to copy.
 ### UI we have **not** mapped to a CompatLayerCT path
 
 These show up in the Intel OneXConsole UI / OEM write-ups. They are **not**
-in the HTTP table we extracted. Capture them on Windows (pipe → HTTP,
-toggle the control, watch 1013):
+in the HTTP table we extracted. How to grab the POSTs:
+[onexconsole-api.md — capture](onexconsole-api.md#how-to-capture-posts-windows).
 
 | UI | Likely backend | Why the split moves |
 |---|---|---|

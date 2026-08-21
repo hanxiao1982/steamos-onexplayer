@@ -199,12 +199,115 @@ copy that: set PL1/PL2/PL4 watts, leave `time_window_us` alone. A short
 tau is a measurement convenience, not a OneXConsole clone. See
 [tdp.md](tdp.md#onexconsole-and-long_term-tau).
 
-## How to use this on the device
+## How to capture POSTs (Windows)
 
-1. Start OneXConsole. Confirm `CompatLayerCT.exe` and `netstat` `:1013`.
-2. If 1013 is closed, set `C:\Windows\OEM\app_config.json` `isPipeMode` to `0` and restart.
-3. In a second browser or Fiddler, watch `http://localhost:1013`. Filter `/func/`, `/fan/`, `/battery/`, `/msr/`, `/ryzenadj/`.
-4. Change fan / charge / TDP in the UI and read the path numbers.
-5. Decode init addresses with `reg = encoded - 0x400` (1259 → `0xEB`). Live set routes are already human values (40, 25, `true`).
+The Vue F12 Network tab will **never** show these. The main process talks
+to CompatLayerCT (pipe or `http.request`), not the renderer. Fiddler /
+system-proxy tools usually miss `127.0.0.1` Node requests too. Capture
+**loopback TCP 1013**, or stay on the pipe and read WriteFile buffers.
 
-Do not write unknown addresses from a replayed `init*` or `set*` call; the write packing for OxpWMI is still only confirmed for reads.
+### 1. Switch pipe → HTTP (required for Wireshark / pktmon)
+
+Admin CMD. The file is only read from this path; there is no CLI flag.
+
+```bat
+mkdir C:\Windows\OEM 2>nul
+if exist C:\Windows\OEM\app_config.json copy /y C:\Windows\OEM\app_config.json C:\Windows\OEM\app_config.json.bak
+echo { "isPipeMode": 0 } > C:\Windows\OEM\app_config.json
+taskkill /IM OneXConsole.exe /F
+taskkill /IM CompatLayerCT.exe /F
+```
+
+Start OneXConsole. Log should say `Layer run by webservice`, not
+`Layer run by pipe`. Then:
+
+```bat
+netstat -ano | findstr :1013
+```
+
+`LISTENING` on `127.0.0.1:1013` (or `0.0.0.0:1013`) owned by
+`CompatLayerCT.exe`. If 1013 is still closed, you are still on the pipe
+— check the JSON is valid (no UTF-16 from `echo` in PowerShell; use CMD
+or write the file in notepad as ANSI/UTF-8).
+
+Smoke-test the capture path with a known route **before** hunting DTT:
+
+```bat
+curl -s -X POST http://127.0.0.1:1013/func/getOXPSetTdpAble
+```
+
+Expect `{ "code": 1, "result": "..." }`. If curl fails, capture will be empty.
+
+### 2. Preferred: `pktmon` (built-in, no extra install)
+
+Admin CMD. Do **one** UI gesture per capture so the POST is obvious.
+
+```bat
+pktmon filter remove
+pktmon filter add -t TCP -p 1013
+pktmon start --capture --pkt-size 0 --comp nics
+```
+
+In OneXConsole, toggle **one** control (Intel dynamic performance, Turbo,
+TDP slider, CPU boost). Then:
+
+```bat
+pktmon stop
+pktmon etl2pcap PktMon.etl -o oxp-1013.pcap
+```
+
+Open `oxp-1013.pcap` in Wireshark. Display filter:
+
+```
+tcp.port == 1013 && http.request.method == "POST"
+```
+
+If Wireshark does not decode HTTP (chunked WCF), follow the TCP stream
+(`Follow` → `TCP Stream`) and look for `POST /`.
+
+`PktMon.etl` lands in the current directory. Convert is optional; Wireshark
+can also open the etl after `etl2pcap`.
+
+### 3. Wireshark + Npcap loopback
+
+Install Npcap with **loopback** support. Capture on
+**Adapter for loopback traffic capture**. Filter `tcp.port == 1013`.
+Same UI toggle, then `http.request.method == "POST"` or Follow TCP Stream.
+
+Do not pick the Wi-Fi / Ethernet NIC — this traffic never leaves the box.
+
+### 4. If you must stay on the pipe
+
+Default `isPipeMode=1` uses `\\.\pipe\CompatLayerCT` (same URL paths, not
+HTTP). Wireshark will see nothing on 1013.
+
+- Sysinternals **Process Monitor**: process `OneXConsole.exe` /
+  `CompatLayerCT.exe`, operation `WriteFile`, path contains
+  `\pipe\CompatLayerCT`. Enable **stack + detail**; the buffer is the
+  `POST /…` line. Noisy; still usable for a single toggle.
+- API Monitor on `WriteFile` for that pipe — same idea.
+
+There is no public `/ECRamReadByte` HTTP route to watch instead.
+
+### 5. What to click, what to keep
+
+One toggle per pcap. Write down: control name, before/after, file name.
+
+| You click | Paths to keep |
+|---|---|
+| TDP slider | `/msr/setCpuPl/`, `/msr/setCpuPl4/`, `/tdp/` |
+| Turbo / CPU boost / max clock | `/powerplan/` |
+| Intel dynamic performance / Adaptive TDP / Follow FPS | **unknown** — keep **every** new `POST /…` that is not fan/battery/RGB. Especially `/msr/`, `/tdp/`, `/func/`, `/intel/`, `/dtt/`, `/ipf/`, `/xtu/` |
+| Fan / charge (sanity) | `/fan/`, `/battery/` — already mapped; use only to prove capture works |
+
+Ignore startup `init*` after the first boot capture. Decode init
+addresses with `reg = encoded - 0x400` (1259 → `0xEB`). Live set routes
+are already human values (`40`, `25`, `true`).
+
+Copy the **full path + JSON body** (often empty). `code == 1` is success.
+
+Do not write unknown addresses from a replayed `init*` or `set*` call; the
+write packing for OxpWMI is still only confirmed for reads.
+
+Restore pipe mode when done: put `isPipeMode` back to `1` (or restore the
+`.bak`) and restart OneXConsole. HTTP mode is only for capture.
