@@ -98,7 +98,7 @@ battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 
 ## SteamOS / Linux
 
-WMI driver (Intel / OxpWMI): [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Deploy on Bazzite/CachyOS with the same `kmod/scripts` path as AMD boards: `ec-stack.sh` prints `oxp-wmi`, then `apply-all.sh` / `install-oxp-wmi.sh` (or `ssh-handheld.sh user@host all`). Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`. `oxp-tdp-rapl` reads `0xE3` (`power_supply_mode`) for adapter-class PL4 (160/120/65).
+WMI driver (Intel / OxpWMI): [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Deploy on Bazzite/CachyOS with the same `kmod/scripts` path as AMD boards: `ec-stack.sh` prints `oxp-wmi`, then `apply-all.sh` / `install-oxp-wmi.sh` (build + print `insmod`; no boot service) and `sudo test-oxp-wmi.sh` for this boot. Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`. `oxp-tdp-rapl` reads `0xE3` (`power_supply_mode`) for adapter-class PL4 (160/120/65).
 
 Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
 

@@ -128,7 +128,7 @@ else
     echo "oxp_wmi is loaded but has no power_supply_mode sysfs"
   else
     echo "oxp_wmi is not loaded — PL4 will fall back to 160 W (100 W class)."
-    echo "  sudo kmod/scripts/install-oxp-wmi.sh"
+    echo "  sudo kmod/scripts/test-oxp-wmi.sh"
     echo "  then: cat /sys/bus/wmi/devices/*/power_supply_mode"
   fi
   if [[ -r /sys/kernel/debug/ec/ec0/io ]]; then

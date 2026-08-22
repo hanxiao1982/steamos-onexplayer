@@ -20,5 +20,5 @@ Two platforms, two maps:
 - [docs/ec/oxp-wmi.md](docs/ec/oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer Intel / OxpWMI)
 - [docs/ec/tdp.md](docs/ec/tdp.md) — Steam `TdpLimit1` via Intel RAPL (not EC)
 - [linux/oxp-wmi/](linux/oxp-wmi/) — out-of-tree Intel OxpWMI client (`WMAC` Integer Arg2)
-- X2 Mini deploy uses `kmod/scripts` (`ec-stack.sh` → `build.sh oxp-wmi` → `install-oxp-wmi.sh`); see [docs/local-build-and-deploy.md](docs/local-build-and-deploy.md)
+- X2 Mini deploy uses `kmod/scripts` (`ec-stack.sh` → `build.sh oxp-wmi` → manual `test-oxp-wmi.sh`); see [docs/local-build-and-deploy.md](docs/local-build-and-deploy.md)
 - [docs/ec/maps.yaml](docs/ec/maps.yaml) — machine-readable tables
