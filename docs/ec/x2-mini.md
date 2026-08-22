@@ -55,7 +55,7 @@ Cross-checked against `background.js` routes. None of these write the G3E EC map
 
 | UI | OneXConsole path | Notes |
 |---|---|---|
-| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | Live slider pcap: `11/12/4`, `37/38/4`, `45/46/4` only — no `setCpuPl4`, no `powerplan` / `intelpnp`. PL2=PL1+1. Type 4 = IntelPowerPlugin. `setCpuPl4` is skipped when `0xE3` is 16/18 (`changePl4Func` undefined). `0xED` stays 0. |
+| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | PL2=PL1+1, type 4. Adapter-only 16/18: no `setCpuPl4`. Battery: every apply is `setCpuPl4` then `setCpuPl`. PL4 **160** (100 W) or **120** (65 W+battery / key 9); not a function of the slider. Boot: `/tdp/init/3/45/46`, `/powerplan/setCpuBoostMode/2`. No `intelpnp` on slider or adapter swap. `0xED` stays 0. |
 | CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Shifts package share toward IA. Not `0xEB`. |
 | CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA MHz so GT can keep watts. Off → `0`. |
 | Intel dynamic performance / Adaptive TDP | `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` (JS); `/power/setCpuMaxStatusPercent/{n}` (exe only) | No `/dtt/` template. See [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md). |
@@ -78,7 +78,7 @@ OneXConsole formula: `adapter_class | (battery ? 0x01 : 0)` — bits 0 battery, 
 | ≤65W, no battery | **16** (`0x10`) | **8** | only bit4; not `8` or `24` |
 | ≥140W / DC-in | not measured | 4 / 5 | X2 Mini `dcin=false`; keys 4/5 still exist as TypeC ≥140W icons |
 
-Firmware adds **bit4 (`0x10`)** = adapter-only. Normalize for oxp lookup: `16→8`, `18→2`. X2 Mini `changePl4Func` handles `1|2|3|4|5→160`, `9→120`, `8→65` — live **16/18** are missing. Full bit table: [ui-vs-ec.md](ui-vs-ec.md).
+Firmware adds **bit4 (`0x10`)** = adapter-only. Normalize for oxp lookup: `16→8`, `18→2`. X2 Mini `changePl4Func` handles `1|2|3|4|5→160`, `9→120`, `8→65` — live **16/18** are missing (no HTTP PL4). With battery, 100 W → PL4 160 and 65 W → PL4 120 (key 9); slider stays 3–45 (`/tdp/init/3/45/46`), not the key-8 25 W clamp. Full bit table: [ui-vs-ec.md](ui-vs-ec.md).
 
 ## Init (OneXConsole)
 

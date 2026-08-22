@@ -18,11 +18,12 @@ not HHD:
 
 ```
 Steam → steamos-manager TdpLimit1 → remotes.d oxp-rapl.toml
-      → com.steampowered.OxpRapl.Tdp → intel-rapl PL1 (+ PL2 = PL1+5 W)
+      → com.steampowered.OxpRapl.Tdp → intel-rapl PL1 (+ PL2 = PL1+1 W)
 ```
 
-Slider range for X2 Mini follows OneXConsole: **8–45 W**, default **25 W**
-(the daemon reports the current PL1 if it already sits in range).
+Slider range for X2 Mini: Linux remote **8–45 W**, default **25 W**
+(the daemon reports the current PL1 if it already sits in range). Live
+OneXConsole `/tdp/init/3/45/46` uses UI min **3**.
 
 Installing the remote does **not** prove RAPL *enforcement*. Confirm that
 separately under load (`diag-tdp.sh --set` 15 then 40). Overlay CPU watts are
@@ -62,9 +63,9 @@ Windows OneXConsole 0.10.2-fix8 never takes a tau argument:
 
 | Call | What it writes |
 |---|---|
-| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | Live 58 s pcap: `/11/12/4`, `/37/38/4` ×2, `/45/46/4`. PL1 = slider, PL2 = PL1+1 (45→46), type 4 = IntelPowerPlugin (MSR+MMIO), not a watt. |
-| `/msr/setCpuPl4/{pl4}/{type}` | In JS, but **absent** from that slider capture. `changePl4Func` returns nothing for live `0xE3` 16/18, and `makeSetEffect` skips `setCpuPl4` when PL4 is unset. |
-| `/tdp/init/{min}/{max}/{maxBoost}` | UI slider bounds only |
+| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | PL1 = slider, PL2 = PL1+1 (45→46), type 4 = IntelPowerPlugin (MSR+MMIO). Live: `11/12`, `18/19`, `32/33`, `34/35`, `28/29`, `37/38`, `45/46`. |
+| `/msr/setCpuPl4/{pl4}/{type}` | Adapter-class PL4, **before** each `setCpuPl` when `0xE3` maps. Battery pcap: **160** on 100 W (even at 11 W), **120** on 65 W+battery. Adapter-only 16/18: skipped. |
+| `/tdp/init/{min}/{max}/{maxBoost}` | UI bounds only. Live boot: **`3/45/46`**. |
 | `/func/getOXPSetTdpAble` | EC `0xED` gate read (stays 0; TDP is not EC) |
 | `changePl4Func` keys | Adapter-class / PL4 table, not a time window |
 
@@ -98,13 +99,13 @@ eats that ceiling is a second policy layer.
 | Interface | What it actually does to the split |
 |---|---|
 | `/msr/setCpuPl/{pl1}/{pl2}/{type}` **`type`** | Live `/37/38/4`: slider=PL1, PL2=PL1+1, **4 = IntelPowerPlugin / CCHWApiExt** (SetPL1MSR+MMIO). Default type is 3 (raw `msr-cmd` 0x610). Not a watt. |
-| `/msr/setCpuPl4/{pl4}/{type}` | Peak clamp when `0xE3` maps. Not sent on the live slider-only pcap (adapter-only 16/18). |
+| `/msr/setCpuPl4/{pl4}/{type}` | Adapter-class peak clamp (160 / 120 / 65), not a CPU/GPU ratio. Sent on every TDP apply when `0xE3` maps; skipped for adapter-only 16/18. |
 | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost (OEM “Turbo On”). Boost on → IA takes more of the package; Boost off → leftover goes to GT. Community X1 notes: GPU-bound games want Turbo **off**. |
 | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA max MHz (0 = off). Same idea: clip CPU so GPU can keep the watts. |
 | `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` | Intel PnP OEM variable via the power scheme. DTT/Adaptive-Performance-shaped; not package watts. **JS does call this.** |
 | `/power/setCpuMaxStatusPercent/{n}` | In the **exe** UriTemplates, **not** in 0.10.2-fix8 `background.js` invokes. Windows processor-maximum-state (%). Best named CPU↔GPU share knob in the binary. |
 | `/power/setCpuBoostMode/{n}` | Exe-only alias of the powerplan boost write. |
-| `/battery/setMaxTdpLimit/{true\|false}` | Lock-to-max-TDP flag. Not a split knob, but it changes which PL table is applied. |
+| `/battery/setMaxTdpLimit/{true\|false}` | Boot sent `true`; slider still moved 11–45 W. Not “pin PL1 to max”. |
 | `changePl4Func` via EC `0xE3` | Adapter-class PL4 (65 / 120 / 160 W). Burst headroom, not a ratio. |
 
 X2 Mini has **no** `/ryzenadj/setGpuClock` / `manualGpuClk`. There is no
@@ -118,9 +119,11 @@ performance” are the named writes above (`intelpnp/…`,
 time-varying PL1 (and maybe those same writes). How to confirm which
 POST the slider actually sends:
 [onexconsole-api.md — capture](onexconsole-api.md#how-to-capture-posts-windows).
-Live 58 s slider pcap: only `/msr/setCpuPl/{11,37,45}/…/4` plus sensor /
-HID / display gets. No `intelpnp` / `powerplan` / `setCpuMaxStatusPercent`.
-Full table: [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md).
+Adapter-only slider pcap: only `/msr/setCpuPl/…/4`. Battery + adapter-swap
+pcap: `setCpuPl4` + `setCpuPl` pairs, boot `/powerplan/setCpuBoostMode/2`
+and `/tdp/init/3/45/46`. Still no `intelpnp` / `setCpuMaxStatusPercent`
+on TDP or 65↔100 W swaps. Full table:
+[compatlayerct-uritemplates.md](compatlayerct-uritemplates.md).
 
 ### Behind `type=4` (not an HTTP route)
 
@@ -228,9 +231,10 @@ deadlock).
   ~15 W is that gap, not a failed PL1 write.
 - Fan (`FanControl1` is already on the bus on the live unit; wiring it to
   `oxp_wmi` pwm is a separate job).
-- PL4 / adapter-class tables (`0xE3`). Live slider pcap did **not** POST
-  `setCpuPl4` (adapter-only 16/18 is unmapped). Linux still interpolates
-  PL4 70–160 W as a local GT clip workaround, not a clone of that HTTP.
+- PL4 / adapter-class tables (`0xE3`). Windows: **160** on 100 W (any
+  slider, including 11 W), **120** on 65 W+battery; skip HTTP PL4 on
+  adapter-only 16/18. Linux still interpolates 70–160 W with the slider
+  so mid-TDP does not pin GT at RP0 — not a clone of that HTTP.
 - CPU vs GPU **share** (DTT Power Share, `/powerplan/*`, SoC slider). Package
   PL1 is only the ceiling. See [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1).
 - `oxp-wmi` / EC `0xED`.
@@ -251,7 +255,7 @@ sudo kmod/scripts/diag-gpu.sh
 | What you see | Meaning |
 |---|---|
 | `max_freq` (or `gt_max_freq_mhz`) ≈ 1500, `rp0` ≈ 2300 | Linux GT max request is capped; try `sudo kmod/scripts/diag-gpu.sh --raise-max` |
-| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 too low** (BIOS 55 W). At **45 W** TDP, PL4 should be ~160 W. Do not leave PL4 at 160 W for every slider position. |
+| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 too low** (BIOS 55 W). Windows on 100 W writes PL4 **160 at every slider position** (live `setCpuPl4/160` + `setCpuPl/11/12`). Linux interpolates 70–160 so a low slider does not also pin GT at RP0. |
 | A **non-** `intel-rapl:0` powercap zone still at ~15 W | `processor_thermal_rapl` / DPTF, not our TdpLimit1 writer |
 | Overlay 15 W but `diag-tdp.sh --measure` much higher | Overlay telemetry (often `energy_uj` 0400 or i915/xe), not package RAPL |
 

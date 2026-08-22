@@ -89,7 +89,7 @@ Battery-present cases (`1` / `3` / `9`) are the oxp keys. Adapter-only cases set
 
 ≥100W no-battery follows `oxp_even | 0x10` (`2|0x10 = 18`). ≤65W no-battery does **not** (`8|0x10` would be 24); firmware emits bare `0x10`, so 65W is implied when bit4 is set and bit1 is clear.
 
-X2 Mini `changePl4Func`: `1|2|3|4|5` → PL4 160; `9` → 120; `8` → 65. Live **16** and **18** are missing, so PL4 is undefined for adapter-only.
+X2 Mini `changePl4Func`: `1|2|3|4|5` → PL4 160; `9` → 120; `8` → 65. Live **16** and **18** are missing, so PL4 is undefined for adapter-only. Battery + 100 W brick → HTTP `setCpuPl4/160` (any slider). Battery + 65 W brick → `setCpuPl4/120` and **no** 25 W slider clamp (that clamp is key `8` only).
 
 Decode / normalize to oxp keys:
 

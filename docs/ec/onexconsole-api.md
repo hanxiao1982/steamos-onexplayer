@@ -190,9 +190,59 @@ tshark HTTP/`data.text` is empty on this file):
 | 1 | `/msr/setCpuPl/11/12/4` | TDP slider 11 W |
 | 1 | `/msr/setCpuPl/45/46/4` | TDP slider 45 W (max) |
 
-**Not in this capture:** `/msr/setCpuPl4`, `/tdp/`, `/powerplan/`,
-`/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/dtt/`, tau / `time_window`.
-Moving the TDP slider on this unit only emits `setCpuPl`.
+**Not in this (adapter-only) capture:** `/msr/setCpuPl4`, `/tdp/`,
+`/powerplan/`, `/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/dtt/`,
+tau / `time_window`. Sliding TDP here only emits `setCpuPl`.
+
+### Live boot + battery + 65 W / 100 W swap
+
+Second Packet Monitor extract (battery inserted, OneXConsole cold start,
+then several TDP moves, then 65 W ↔ 100 W adapters). Chronological
+TDP-related POSTs:
+
+```
+POST /func/setECAccessType/2
+POST /func/initBaseEc/1259/1112/1113          # 0xEB, 0x58, 0x59
+POST /battery/initPowerSupplyModeEC
+POST /func/initMatchKeys
+POST /fan/init/common/1098/0/1/1099/184       # 0x4A / 0x4B, PWM max 184
+POST /func/initHandleEc/1069/1/0/-1           # 0x2D
+POST /func/initOXPSensorEc/1120/1121/1136/1184/1185/1186
+POST /powerplan/init/2000
+POST /battery/initEc
+POST /battery/setChargeLimit/95
+POST /battery/setByPassPowerMode/2            # HTTP 2 → EC 3
+POST /tdp/init/3/45/46                        # UI min is 3, not 8
+POST /battery/setMaxTdpLimit/true
+POST /tdp/init/3/45/46
+POST /powerplan/setCpuBoostMode/2             # Turbo on, once at boot
+POST /msr/setCpuPl4/160/4
+POST /msr/setCpuPl/11/12/4                    # restore / first apply
+… slider: 18/19, 32/33, 45/46, always after setCpuPl4/160 …
+… adapter → 65 W: setCpuPl4/120 + setCpuPl/45/46 (×5) …
+… adapter → 100 W: setCpuPl4/160 + setCpuPl/34/35 then 28/29 …
+```
+
+Counts that matter: `setCpuPl4/160` ×11, `setCpuPl4/120` ×5,
+`setCpuPl/45/46` ×6, plus `11/12`, `18/19`, `32/33`, `34/35`, `28/29`.
+Still **no** `/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/dtt/`,
+`/powerplan/setCpuMaxClock`, tau. Adapter swaps do **not** add a new
+route — they only change the PL4 argument and re-send the current PL1/PL2.
+
+Rules this pcap locks:
+
+| Knob | Live behavior |
+|---|---|
+| Pairing | Every TDP apply is `setCpuPl4` **then** `setCpuPl` when `0xE3` maps |
+| PL2 | Always PL1+1 (`11/12` … `45/46`) |
+| Type | Always `4` |
+| PL4 | **Adapter class**, not a function of the slider. 100 W / keys `1–5` → **160**; 65 W + battery / key `9` → **120**. 11 W and 45 W both used PL4 160 on the 100 W brick |
+| 65 W clamp | Key `8` (JS) clamps the slider to 25/26. Key `9` does **not**: this capture kept `/45/46` while PL4 was 120 |
+| `setMaxTdpLimit/true` | Boot only. Slider still moved to 11–45, so this is not “pin to max watts” |
+| `tdp/init` | `3/45/46` twice (bounds only) |
+
+The first adapter-only pcap skipped `setCpuPl4` because `0xE3` 16/18 are
+unmapped. With a battery the key is `1–5` / `8` / `9` and PL4 is sent.
 
 That is exactly `background.js` `He.setCpuPl(pl1, pl2)` with
 `intelTdpSetType=4`. First field is the slider (PL1). Second is
@@ -222,8 +272,10 @@ type 4 copies bundled `CCHWApiExt.sys` / `cchwapiext.cat` into
 raw `msr-cmd.exe` `0x610` path. There is no JS comment “4 = DTT”; the
 plugin + MMIO+MSR exports are the evidence.
 
-`/tdp/init` is still UI bounds only. 65 W adapter (`0xE3` key 8) also
-clamps the slider to 25/26 — a 37 W POST means that clamp is not active.
+`/tdp/init` is still UI bounds only. Live boot sent `/tdp/init/3/45/46`
+(min **3**, not the Linux remote’s 8). 65 W adapter **key 8** clamps the
+slider to 25/26; **key 9** (65 W + battery, PL4 120) does not — live
+`/45/46` + `/setCpuPl4/120` on that brick.
 
 Changing TDP in the UI does **not** write watts into an EC register. After optional `/func/getOXPSetTdpAble`, Electron POSTs:
 
@@ -277,11 +329,12 @@ There is **no** tau / `time_window` / `long_term` argument on these routes.
 `setCpuPl` writes watts (and, inside CompatLayerCT, the usual RAPL
 clamp-enable bits). Firmware PL1 window stays at the BIOS default
 (~28 s on live X2 Mini `constraint_0_time_window_us=27983872`).
-`changePl4Func` is adapter-class / PL4, not a window write. A slider-only
-capture on adapter-only `0xE3` 16/18 will **not** contain `setCpuPl4`.
-Linux still writes a local PL4 (BIOS 55 W clips GT); that is not a clone
-of this HTTP trace. Leave `time_window_us` alone. See
-[tdp.md](tdp.md#onexconsole-and-long_term-tau).
+`changePl4Func` is adapter-class / PL4, not a window write. Adapter-only
+`0xE3` 16/18 → no `setCpuPl4`. Battery + mapped key → `setCpuPl4` on
+every slider move and every adapter swap, value 160 or 120 (or 65),
+independent of PL1. Linux still interpolates PL4 70–160 W with the
+slider (BIOS 55 W clips GT); that is **not** this HTTP. Leave
+`time_window_us` alone. See [tdp.md](tdp.md#onexconsole-and-long_term-tau).
 
 ## How to capture POSTs (Windows)
 
@@ -462,7 +515,7 @@ One toggle per pcap. Write down: control name, before/after, file name.
 | You click | Paths to keep |
 |---|---|
 | **Cold start (no click)** | See section 7. `init*`, `/tdp/init`, first `setCpuPl` / `setCpuPl4`, `/powerplan/`, `/intelpnp/`. |
-| TDP slider | `/msr/setCpuPl/` only on live adapter-only X2 Mini. `/msr/setCpuPl4/` only if `0xE3` maps in `changePl4Func`. No `/tdp/` write. |
+| TDP slider | Always `/msr/setCpuPl/{pl1}/{pl1+1}/4`. Plus `/msr/setCpuPl4/{160\|120\|65}/4` first when `0xE3` maps (battery / known adapter key). Adapter-only 16/18: no PL4 POST. |
 | Turbo / CPU boost / max clock | `/powerplan/` |
 | Intel dynamic performance / Adaptive TDP / Follow FPS | `/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/powerplan/`, `/msr/` — no `/dtt/` in the exe |
 | Fan / charge (sanity) | `/fan/`, `/battery/` — already mapped; use only to prove capture works |
@@ -636,14 +689,14 @@ POST /func/initOXPSensorEc/...
 POST /fan/init/...
 POST /battery/initEc
 POST /battery/initPowerSupplyModeEC
-POST /tdp/init/8/45/46
+POST /tdp/init/3/45/46
 ```
 
 New vs the 58 s slider pcap (those are the reason for this shot):
 
 | Path | Why we care |
 |---|---|
-| `/msr/setCpuPl4/{pl4}/4` | Boot-time PL4 despite unmapped `0xE3` 16/18? |
+| `/msr/setCpuPl4/{pl4}/4` | Yes with battery: 160 on 100 W, 120 on 65 W+battery. Absent on adapter-only 16/18. |
 | `/msr/setCpuPl/{pl1}/{pl2}/4` | Restored last slider, not a new gesture |
 | `/intelpnp/setOEMVarWithPowerScheme/{n}` | DTT-shaped OEM var |
 | `/powerplan/setCpuBoostMode/{0\|2}` | Turbo restore |
