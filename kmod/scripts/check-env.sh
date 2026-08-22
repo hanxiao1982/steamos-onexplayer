@@ -359,9 +359,6 @@ if [[ "$EC_STACK" == oxp-wmi ]]; then
   if [[ -n "$ROOT" && -e "${ROOT}/linux/oxp-wmi/oxp-wmi.ko" ]]; then
     ok "built module" "${ROOT}/linux/oxp-wmi/oxp-wmi.ko"
   fi
-  if [[ -e /etc/systemd/system/oxp-wmi-local.service ]]; then
-    warn "oxp-wmi-local.service" "leftover boot unit; load is manual — disable --now and rm the unit"
-  fi
 else
   oxpec_cfg="$(kconfig_val CONFIG_OXPEC)"
   if [[ "$oxpec_cfg" == y ]]; then
