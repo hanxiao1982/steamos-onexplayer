@@ -62,8 +62,8 @@ Windows OneXConsole 0.10.2-fix8 never takes a tau argument:
 
 | Call | What it writes |
 |---|---|
-| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | Live: `/msr/setCpuPl/37/38/4`. PL1 = slider, PL2 = PL1+1 (45→46), type 4 = IntelPowerPlugin (MSR+MMIO), not a watt. |
-| `/msr/setCpuPl4/{pl4}/{type}` | PL4 watts |
+| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | Live 58 s pcap: `/11/12/4`, `/37/38/4` ×2, `/45/46/4`. PL1 = slider, PL2 = PL1+1 (45→46), type 4 = IntelPowerPlugin (MSR+MMIO), not a watt. |
+| `/msr/setCpuPl4/{pl4}/{type}` | In JS, but **absent** from that slider capture. `changePl4Func` returns nothing for live `0xE3` 16/18, and `makeSetEffect` skips `setCpuPl4` when PL4 is unset. |
 | `/tdp/init/{min}/{max}/{maxBoost}` | UI slider bounds only |
 | `/func/getOXPSetTdpAble` | EC `0xED` gate read (stays 0; TDP is not EC) |
 | `changePl4Func` keys | Adapter-class / PL4 table, not a time window |
@@ -98,7 +98,7 @@ eats that ceiling is a second policy layer.
 | Interface | What it actually does to the split |
 |---|---|
 | `/msr/setCpuPl/{pl1}/{pl2}/{type}` **`type`** | Live `/37/38/4`: slider=PL1, PL2=PL1+1, **4 = IntelPowerPlugin / CCHWApiExt** (SetPL1MSR+MMIO). Default type is 3 (raw `msr-cmd` 0x610). Not a watt. |
-| `/msr/setCpuPl4/{pl4}/{type}` | Peak clamp. Changes how hard GT can burst before `reason_pl4`, not a CPU/GPU ratio. |
+| `/msr/setCpuPl4/{pl4}/{type}` | Peak clamp when `0xE3` maps. Not sent on the live slider-only pcap (adapter-only 16/18). |
 | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost (OEM “Turbo On”). Boost on → IA takes more of the package; Boost off → leftover goes to GT. Community X1 notes: GPU-bound games want Turbo **off**. |
 | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA max MHz (0 = off). Same idea: clip CPU so GPU can keep the watts. |
 | `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` | Intel PnP OEM variable via the power scheme. DTT/Adaptive-Performance-shaped; not package watts. **JS does call this.** |
@@ -226,8 +226,9 @@ deadlock).
   ~15 W is that gap, not a failed PL1 write.
 - Fan (`FanControl1` is already on the bus on the live unit; wiring it to
   `oxp_wmi` pwm is a separate job).
-- PL4 / adapter-class tables (`0xE3`). PL4 is interpolated 70–160 W from the
-  TDP slider, not read from EC. 65 W adapter (OneXConsole key 8) is not applied.
+- PL4 / adapter-class tables (`0xE3`). Live slider pcap did **not** POST
+  `setCpuPl4` (adapter-only 16/18 is unmapped). Linux still interpolates
+  PL4 70–160 W as a local GT clip workaround, not a clone of that HTTP.
 - CPU vs GPU **share** (DTT Power Share, `/powerplan/*`, SoC slider). Package
   PL1 is only the ceiling. See [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1).
 - `oxp-wmi` / EC `0xED`.

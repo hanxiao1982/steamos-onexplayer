@@ -27,7 +27,7 @@ TDP slider cannot be observed by polling OneXConsole gets. The only TDP
 | Template | In `background.js`? | Role |
 |---|---|---|
 | `msr/setCpuPl/{pl1}/{pl2}/{type}` | yes (`intelTdpSetType`) | Live X2 Mini `/37/38/4`: PL1=slider, PL2=PL1+1. Type **4** = IntelPowerPlugin (MSR+MMIO), not a watt. |
-| `msr/setCpuPl4/{pl4}/{type}` | yes | PL4. |
+| `msr/setCpuPl4/{pl4}/{type}` | yes | PL4. Live 58 s TDP-slider pcap on adapter-only X2 Mini: **not sent** (`changePl4Func` misses `0xE3` 16/18). |
 | `tdp/init/{minTdp}/{maxTdp}/{maxBoostTdp}` | yes | UI slider bounds only. |
 | `ryzenadj/setCpuPl/{pl1}/{pl2}` | yes | AMD. |
 | `ryzenadj/setGpuClock/{clock}` | yes | AMD; X2 Mini does not enable this. |

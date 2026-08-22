@@ -55,7 +55,7 @@ Cross-checked against `background.js` routes. None of these write the G3E EC map
 
 | UI | OneXConsole path | Notes |
 |---|---|---|
-| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | Live `37/38/4`: PL1=slider, PL2=PL1+1 (45→46). Type 4 = IntelPowerPlugin (MSR+MMIO). PL4 from `0xE3` (160/120/65), same type. `0xED` stays 0. |
+| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | Live slider pcap: `11/12/4`, `37/38/4`, `45/46/4` only — no `setCpuPl4`, no `powerplan` / `intelpnp`. PL2=PL1+1. Type 4 = IntelPowerPlugin. `setCpuPl4` is skipped when `0xE3` is 16/18 (`changePl4Func` undefined). `0xED` stays 0. |
 | CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Shifts package share toward IA. Not `0xEB`. |
 | CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA MHz so GT can keep watts. Off → `0`. |
 | Intel dynamic performance / Adaptive TDP | `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` (JS); `/power/setCpuMaxStatusPercent/{n}` (exe only) | No `/dtt/` template. See [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md). |

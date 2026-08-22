@@ -170,24 +170,46 @@ X2 Mini PRO / APEX keep WinRing0 (`setECAccessType/1`) and the AMD defaults `126
 
 ## TDP watts (not EC)
 
-Live X2 Mini capture (slider **37 W**):
+Live X2 Mini Packet Monitor pcapng (58.6 s, 834 frames, ASCII extract —
+tshark HTTP/`data.text` is empty on this file):
 
-```
-POST /msr/setCpuPl/37/38/4
-```
+| Count | POST | Role |
+|---|---|---|
+| 36 | `/battery/getPowerSupplyMode` | Poll EC `0xE3` (~1.6 s; 36 × 1.6 s ≈ capture length) |
+| 36 | `/func/getOXPSensorCpuTemp` | Poll EC temp |
+| 36 | `/func/listAllProcess` | Same poll loop |
+| 5 | `/programhandle/ph/changeReportMode` | Handle HID, not TDP |
+| 4 | `/fan/getFanSpeed` | Fan poll |
+| 4 | `/handledHID/setSimulateEnabled/false` | Handle HID |
+| 4 | `/screen/getBrightness` | Windows brightness get |
+| 4 | `/volume/getVolume` | Windows volume get |
+| 2 | `/handledHID/clearAll` | Handle HID |
+| 2 | `/msr/setCpuPl/37/38/4` | TDP slider 37 W |
+| 2 | `/screen/getCurrentSettingResolution` | Display get |
+| 2 | `/screen/listResolution` | Display get |
+| 1 | `/msr/setCpuPl/11/12/4` | TDP slider 11 W |
+| 1 | `/msr/setCpuPl/45/46/4` | TDP slider 45 W (max) |
+
+**Not in this capture:** `/msr/setCpuPl4`, `/tdp/`, `/powerplan/`,
+`/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/dtt/`, tau / `time_window`.
+Moving the TDP slider on this unit only emits `setCpuPl`.
 
 That is exactly `background.js` `He.setCpuPl(pl1, pl2)` with
 `intelTdpSetType=4`. First field is the slider (PL1). Second is
 `pl2MappingFunc(PL1)`: on `ONEXPLAYER X2Mini`, **PL2 = PL1+1**, except at
-`maxTdp` 45 where PL2 is `maxBoostTdp` **46** (still +1). Generic Intel
-default *before* the product override is `PL1+5`; X2 Mini replaces it.
-Third field is the write backend, not a watt.
+`maxTdp` 45 where PL2 is `maxBoostTdp` **46** (still +1). Live
+`11/12`, `37/38`, `45/46` all match. Generic Intel default *before* the
+product override is `PL1+5`; X2 Mini replaces it. Third field is the write
+backend, not a watt.
 
 Slider IPC is `tdpChanged` → `et.setTdp(W)` → queue `Ye=PL1`, `Je=PL2`.
 A ~1.5 s loop runs `makeSetEffect()`:
 
-1. If `adjustAlwaysSetPl4` (Arc G3): `changePl4Func(0xE3)` →
-   `He.setCpuPl4(160|120|65, 4)` **first**.
+1. If `adjustAlwaysSetPl4` (Arc G3): `changePl4Func(0xE3)` → PL4 only
+   when the key is `1|2|3|4|5` (160), `9` (120), or `8` (65).
+   `makeSetEffect` does `if (r) He.setCpuPl4(r)`. Live adapter-only
+   `0xE3` **16** / **18** are not in that table, so `r` is `undefined`
+   and **no** `/msr/setCpuPl4` is sent. This pcap matches that skip.
 2. Then `He.setCpuPl(PL1, PL2)` → `/msr/setCpuPl/{pl1}/{pl2}/4`.
 
 `type=4` is set when DMI CPU string contains `"arc"` and `"g3"` (X2 Mini).
@@ -255,9 +277,10 @@ There is **no** tau / `time_window` / `long_term` argument on these routes.
 `setCpuPl` writes watts (and, inside CompatLayerCT, the usual RAPL
 clamp-enable bits). Firmware PL1 window stays at the BIOS default
 (~28 s on live X2 Mini `constraint_0_time_window_us=27983872`).
-`changePl4Func` is adapter-class / PL4, not a window write. Linux should
-copy that: set PL1/PL2/PL4 watts, leave `time_window_us` alone. A short
-tau is a measurement convenience, not a OneXConsole clone. See
+`changePl4Func` is adapter-class / PL4, not a window write. A slider-only
+capture on adapter-only `0xE3` 16/18 will **not** contain `setCpuPl4`.
+Linux still writes a local PL4 (BIOS 55 W clips GT); that is not a clone
+of this HTTP trace. Leave `time_window_us` alone. See
 [tdp.md](tdp.md#onexconsole-and-long_term-tau).
 
 ## How to capture POSTs (Windows)
@@ -381,9 +404,13 @@ wait for a dissector. On a Packet Monitor file the bytes live in
 `data.text`, not `http.request.uri`.
 
 ```bat
-tshark -r oxp-1013.pcap -Y "frame contains \"POST /\"" -T fields -e frame.number -e frame.len
-tshark -r oxp-1013.pcap -Y "data.text contains \"POST /\"" -T fields -e frame.number -e data.text
+REM CMD: do not write \". A backslash is a literal and the filter misses.
+tshark -r oxp-1013.pcap -Y "frame contains POST" -T fields -e frame.number -e frame.len
 ```
+
+`data.text contains "POST /"` was empty on the live Packet Monitor file
+even when `POST /` is in the bytes. Use PowerShell ASCII (below). In
+`cmd.exe`, `\"` is also wrong quoting.
 
 PowerShell (works on pktmon “raw” and on Npcap loopback):
 
@@ -434,7 +461,7 @@ One toggle per pcap. Write down: control name, before/after, file name.
 
 | You click | Paths to keep |
 |---|---|
-| TDP slider | `/msr/setCpuPl/`, `/msr/setCpuPl4/`, `/tdp/` |
+| TDP slider | `/msr/setCpuPl/` only on live adapter-only X2 Mini. `/msr/setCpuPl4/` only if `0xE3` maps in `changePl4Func`. No `/tdp/` write. |
 | Turbo / CPU boost / max clock | `/powerplan/` |
 | Intel dynamic performance / Adaptive TDP / Follow FPS | `/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/powerplan/`, `/msr/` — no `/dtt/` in the exe |
 | Fan / charge (sanity) | `/fan/`, `/battery/` — already mapped; use only to prove capture works |
