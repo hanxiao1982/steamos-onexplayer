@@ -243,6 +243,22 @@ an interpolated PL4.
 class is visible. If `oxp_wmi` is not loaded, `e3=None` and PL4 falls
 back to 160 W (100 W class) — load the module before judging 65 W.
 
+Live X2 Mini `--set 11` with `oxp_wmi` loaded and `0xE3=9` (`typec-65w+battery`)
+ends at **PL1=11 / PL2=12 / PL4=120** on both `intel-rapl:0` and
+`intel-rapl-mmio:0`, tau ~28 s, Steam `TdpLimitMin=3` / `Max=45`. That is
+the Windows `setCpuPl4/120` + `setCpuPl/11/12` pair.
+
+MMIO `peak_power` can lag: a 120 W write still reads 160 W for ~100 ms.
+A 50 ms verify then treated 120 as rejected and the old fallback list
+tried **160 upward** (`PL4 120 W rejected; wrote 160 W`) even though the
+final dump was already 120. The writer now retries the same wattage
+(~4 × 80 ms) and only falls back *down* (120 → 90 → 70), never 120 → 160.
+
+`=== GT0 freq ===` empty on an older `diag-tdp.sh` is a bash glob bug
+(`case *` matched slashes and skipped `card1/device/tile0`). Current
+`dump_gt` lists that path; the apply line
+`GT …/gt0/freq0: min=1000 max=1247` is the Linux-only RPe→RP0 lerp.
+
 ## What this does not do
 
 - GPU clock slider (`GpuPerformanceLevel1`) — X2 Mini Windows UI has no manual

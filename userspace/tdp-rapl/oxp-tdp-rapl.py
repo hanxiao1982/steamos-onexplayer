@@ -346,19 +346,26 @@ def set_zone_enabled(zone: Path, on: bool) -> None:
     f.write_text("1\n" if on else "0\n", encoding="utf-8")
 
 
-def write_limit_uw(zone: Path, idx: int, uw: int) -> None:
+def write_limit_uw(zone: Path, idx: int, uw: int, attempts: int = 4) -> None:
+    """Write a RAPL limit and wait for PCODE/sysfs to agree.
+
+    MMIO peak_power can lag: a 120 W write still reads 160 W for ~100 ms
+    after a previous 160 W (live X2 Mini). Retry the same value before
+    treating it as a hard reject.
+    """
     path = zone / f"constraint_{idx}_power_limit_uw"
-    path.write_text(f"{uw}\n", encoding="utf-8")
-    time.sleep(0.05)
-    got = _read_text(path)
-    if not got.lstrip("-").isdigit():
-        return
-    got_i = int(got)
-    # RAPL units are often 1/8 W; treat >2 W drift as "did not stick".
-    if abs(got_i - uw) > 2_000_000:
-        raise RuntimeError(
-            f"{path} wrote {uw} but reads back {got} (another daemon may be resetting RAPL)"
-        )
+    last = ""
+    for _ in range(max(1, attempts)):
+        path.write_text(f"{uw}\n", encoding="utf-8")
+        last = _read_text(path)
+        if not last.lstrip("-").isdigit():
+            return
+        if abs(int(last) - uw) <= 2_000_000:
+            return
+        time.sleep(0.08)
+    raise RuntimeError(
+        f"{path} wrote {uw} but reads back {last} after {attempts} tries"
+    )
 
 
 def write_window_us(zone: Path, idx: int, us: int) -> None:
@@ -420,6 +427,24 @@ def apply_watts(
         set_zone_enabled(zone, True)
     pl1, pl2 = pick_pl1_pl2(zone)
     watts = clamp_w(watts, 1, max(1, max_w))
+    # OneXConsole: setCpuPl4 first, then setCpuPl. Never fall back *up*
+    # (120 → 160 would undo a 65 W brick).
+    peak = pick_pl4(zone)
+    if peak is not None:
+        target = pl4_w if pl4_w is not None else DEFAULT_PL4_W
+        target = max(watts, int(target))
+        tried: list[int] = []
+        for cand in pl4_write_candidates(target, watts):
+            if cand in tried:
+                continue
+            tried.append(cand)
+            try:
+                write_limit_uw(zone, peak["index"], w_to_uw(cand))
+                if cand != target:
+                    print(f"PL4 {target} W rejected; wrote {cand} W", flush=True)
+                break
+            except (OSError, RuntimeError) as e:
+                print(f"PL4 {cand} W skipped: {e}", file=sys.stderr)
     try:
         write_limit_uw(zone, pl1["index"], w_to_uw(watts))
         maybe_sync_pl1_window(zone, pl1)
@@ -447,23 +472,17 @@ def apply_watts(
             write_limit_uw(zone, pl2["index"], w_to_uw(pl2_w))
         except (OSError, RuntimeError) as e:
             print(f"PL2 write skipped: {e}", file=sys.stderr)
-    peak = pick_pl4(zone)
-    if peak is not None:
-        target = pl4_w if pl4_w is not None else DEFAULT_PL4_W
-        target = max(watts, int(target))
-        tried = []
-        for cand in (target, *PL4_FALLBACKS):
-            if cand in tried or cand < watts:
-                continue
-            tried.append(cand)
-            try:
-                write_limit_uw(zone, peak["index"], w_to_uw(cand))
-                if cand != target:
-                    print(f"PL4 {target} W rejected; wrote {cand} W", flush=True)
-                break
-            except (OSError, RuntimeError) as e:
-                print(f"PL4 {cand} W skipped: {e}", file=sys.stderr)
     return watts
+
+
+def pl4_write_candidates(target: int, pl1: int) -> list[int]:
+    """Adapter-class first, then only lower fallbacks. Never raise PL4."""
+    out: list[int] = []
+    for cand in (int(target), *PL4_FALLBACKS):
+        if cand < pl1 or cand > target or cand in out:
+            continue
+        out.append(cand)
+    return out
 
 
 def apply_package_watts(watts: int, max_w: int, pl4_w: int | None = None) -> int:
@@ -729,9 +748,34 @@ def run_self_test() -> int:
     assert clamp_tdp_for_e3(45, 9) == 45
     assert clamp_tdp_for_e3(11, 3) == 11
     assert parse_power_supply_mode("18 typec-100w oxp=2 batt=0") == 18
+    assert pl4_write_candidates(120, 11) == [120, 90, 70]
+    assert pl4_write_candidates(160, 11) == [160, 120, 90, 70]
+    assert pl4_write_candidates(65, 11) == [65]
+    assert 160 not in pl4_write_candidates(120, 11)
     wrote = apply_watts(z, 11, 45, pl4_w=160)
     assert wrote == 11
     assert _read_text(z / "constraint_2_power_limit_uw") == "160000000"
+    # Live X2 Mini: MMIO peak_power can still read 160 W after a 120 W write.
+    # Retry the same class; never fall back *up* to 160.
+    real_read = _read_text
+    stale = {"n": 0}
+
+    def lag_read(path: Path) -> str:
+        got = real_read(path)
+        if path.name == "constraint_2_power_limit_uw" and got == "120000000" and stale["n"] < 2:
+            stale["n"] += 1
+            return "160000000"
+        return got
+
+    g = globals()
+    g["_read_text"] = lag_read
+    try:
+        wrote = apply_watts(z, 11, 45, pl4_w=120)
+        assert wrote == 11
+        assert real_read(z / "constraint_2_power_limit_uw") == "120000000"
+        assert stale["n"] == 2
+    finally:
+        g["_read_text"] = real_read
     g = root / "card1" / "device" / "tile0" / "gt0" / "freq0"
     g.mkdir(parents=True)
     (g / "rpe_freq").write_text("1000\n")
