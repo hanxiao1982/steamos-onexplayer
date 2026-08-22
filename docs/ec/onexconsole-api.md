@@ -553,43 +553,79 @@ Npcap alternative: start Wireshark on **Adapter for loopback traffic
 capture**, filter `tcp port 1013`, start capture, *then* launch
 OneXConsole, then stop. Same extract below.
 
-#### D. Extract on the device (order + counts)
+#### D. Extract request **and** response (not a blanket `HTTP` regex)
+
+CompatLayerCT answers are **not** another `POST`. They look like:
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"code":1,"result":"..."}
+```
+
+Do **not** widen the path regex to the word `HTTP`. That hits the
+request line (`POST /foo HTTP/1.1`), every `Host:` / `Content-Type`
+header, and still misses the JSON. Three separate tokens, merged by
+file offset:
+
+| Token | Regex | What it is |
+|---|---|---|
+| Request | `POST /[A-Za-z0-9_./-]+` | Path (already proven on the slider pcap) |
+| Status | `HTTP/1\.[01] \d{3}` | Response line only (`POST … HTTP/1.1` has no ` \d{3}`) |
+| Body | `\{[^{}]*"code"[^{}]*\}` | Wrapper JSON. Init *request* bodies (`addrChargeLimit`, …) have no `"code"`, so they stay out |
 
 `cmd.exe` tshark `data.text` / `\"` filters stay empty on this
-Packet Monitor file. Use PowerShell 7:
+Packet Monitor file. Use PowerShell 7. Pair each POST with the next
+status + `"code"` JSON that appear **before the next POST** (TCP
+splits can leave a hole; that line is still useful):
 
 ```powershell
 $pcap = 'C:\Users\hanxiao\oxp-1013-startup.pcap'
 $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pcap))
-$posts = [regex]::Matches($text, 'POST /[A-Za-z0-9_./-]+') | ForEach-Object { $_.Value }
+$interesting = 'POST /(?:msr|tdp|powerplan|intelpnp|power/|func/(?:set|init)|fan/init|battery/init|battery/set|battery/getPowerSupplyMode|func/getOXPSetTdpAble)'
 
-'--- chronological (first 120) ---'
-$i = 0
-foreach ($p in $posts) {
-  $i++
-  if ($i -gt 120) { break }
-  '{0,4}  {1}' -f $i, $p
+$ev = [System.Collections.Generic.List[object]]::new()
+foreach ($m in [regex]::Matches($text, 'POST /[A-Za-z0-9_./-]+')) {
+  $ev.Add([pscustomobject]@{ At = $m.Index; Kind = 'REQ'; Text = $m.Value })
+}
+foreach ($m in [regex]::Matches($text, 'HTTP/1\.[01] \d{3}[^\r\n]{0,40}')) {
+  $ev.Add([pscustomobject]@{ At = $m.Index; Kind = 'STATUS'; Text = $m.Value.Trim() })
+}
+foreach ($m in [regex]::Matches($text, '\{[^{}]{0,800}?"code"[^{}]{0,800}\}')) {
+  $ev.Add([pscustomobject]@{ At = $m.Index; Kind = 'JSON'; Text = ($m.Value -replace '[^\x20-\x7E]+',' ') })
+}
+$ev = $ev | Sort-Object At
+
+function Show-Pair($req, $items) {
+  if (-not $req) { return }
+  $st = @($items | Where-Object Kind -eq 'STATUS') | Select-Object -First 1
+  $js = @($items | Where-Object Kind -eq 'JSON')   | Select-Object -First 1
+  $req.Text
+  if ($st) { '    {0}' -f $st.Text } else { '    (no HTTP status before next POST)' }
+  if ($js) { '    {0}' -f $js.Text } else { '    (no {"code"} JSON before next POST)' }
 }
 
-'--- interesting only (msr/tdp/power/intel/init/set) ---'
-$posts | Where-Object {
-  $_ -match 'POST /(?:msr|tdp|powerplan|intelpnp|power/|func/(?:set|init)|fan/init|battery/init|battery/set)'
+'--- transcript (interesting paths) ---'
+$pending = $null; $buf = @()
+foreach ($e in $ev) {
+  if ($e.Kind -eq 'REQ') {
+    if ($pending -and $pending.Text -match $interesting) { Show-Pair $pending $buf }
+    $pending = $e; $buf = @()
+  } elseif ($pending) { $buf += $e }
 }
+if ($pending -and $pending.Text -match $interesting) { Show-Pair $pending $buf }
 
-'--- counts ---'
-$posts | Group-Object | Sort-Object Count -Descending |
+'--- POST counts ---'
+$ev | Where-Object Kind -eq 'REQ' | Group-Object Text | Sort-Object Count -Descending |
   ForEach-Object { '{0,5}  {1}' -f $_.Count, $_.Name }
 ```
 
-Optional: leftover JSON near battery/intel inits (bodies are not in the
-path):
+`getPowerSupplyMode` / `getOXPSetTdpAble` are in the interesting list
+on purpose: their **result** is the live `0xE3` / `0xED` byte. Slider
+POSTs have empty request bodies; the useful JSON is the response.
 
-```powershell
-[regex]::Matches($text, 'POST /(?:battery/initEc|battery/initPowerSupplyModeEC|intelpnp/)[^\r\n]*[\s\S]{0,200}') |
-  ForEach-Object { $_.Value -replace '[^\x20-\x7E]+',' ' ; '----' }
-```
-
-Paste **chronological interesting lines + counts**. Do not upload the
+Paste the **interesting transcript + POST counts**. Do not upload the
 pcap. A good startup list should include most of:
 
 ```
