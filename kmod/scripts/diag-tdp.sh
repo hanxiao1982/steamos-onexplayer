@@ -95,11 +95,11 @@ dump_gt() {
   echo "=== GT0 freq ==="
   shopt -s nullglob
   local d
-  for d in /sys/class/drm/card*/device/tile*/gt0/freq0 /sys/class/drm/card*/device/gt0/freq0; do
+  # Do not use case */card*[!0-9]/* — bash case * matches slashes and
+  # skips the live Xe path card1/device/tile0/gt0/freq0.
+  for d in /sys/class/drm/card[0-9]*/device/tile*/gt0/freq0 \
+           /sys/class/drm/card[0-9]*/device/gt0/freq0; do
     [[ -d "$d" ]] || continue
-    case "$d" in
-      */card*[!0-9]/*) continue ;;
-    esac
     echo "-- $d"
     for n in act_freq cur_freq min_freq max_freq rp0_freq rpe_freq; do
       [[ -e "$d/$n" ]] && printf '  %s=%s\n' "$n" "$(tr -d '\n' <"$d/$n")"
@@ -124,6 +124,20 @@ if ((${#e3_files[@]})); then
   done
 else
   echo "(oxp-wmi power_supply_mode not present)"
+  if lsmod | grep -q '^oxp_wmi'; then
+    echo "oxp_wmi is loaded but has no power_supply_mode sysfs"
+  else
+    echo "oxp_wmi is not loaded — PL4 will fall back to 160 W (100 W class)."
+    echo "  sudo kmod/scripts/install-oxp-wmi.sh"
+    echo "  then: cat /sys/bus/wmi/devices/*/power_supply_mode"
+  fi
+  if [[ -r /sys/kernel/debug/ec/ec0/io ]]; then
+    echo -n "debugfs ec0/io[0xE3]="
+    # dd is quieter than xxd on a stripped image
+    od -An -tu1 -N 1 -j 227 /sys/kernel/debug/ec/ec0/io | tr -d ' '
+  else
+    echo "(no debugfs ec0/io either; mount debugfs and/or load ec_sys)"
+  fi
 fi
 
 echo "=== modules ==="

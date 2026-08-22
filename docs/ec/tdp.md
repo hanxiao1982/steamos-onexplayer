@@ -240,7 +240,8 @@ an interpolated PL4.
 | GT `max_freq` | none (DTT / type 4) | still a Linux-only RPe→RP0 lerp |
 
 `diag-tdp.sh` prints the `power_supply_mode` line next to RAPL so PL4
-class is visible.
+class is visible. If `oxp_wmi` is not loaded, `e3=None` and PL4 falls
+back to 160 W (100 W class) — load the module before judging 65 W.
 
 ## What this does not do
 
