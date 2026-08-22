@@ -357,8 +357,11 @@ Typical bad cases:
 | `frame.protocols` | Meaning |
 |---|---|
 | `eth:ethertype:ip:tcp` (no `http`) | TCP is fine; HTTP not bound to port 1013 |
-| `eth:data` / `data` / “Raw packet data” | L2/L3 headers wrong (common after `etl2pcap`) |
+| `eth:ethertype:data` | **Live X2 Mini Packet Monitor pcapng.** `capinfos` says Ethernet, but the EtherType is not IPv4/IPv6, so tshark never builds IP/TCP/HTTP. 60-byte frames are Ethernet min padding; keep the 200–1400 byte ones. |
+| `eth:data` / `data` / “Raw packet data” | Same class of `etl2pcap` L2 lie |
 | empty / only ARP / IPv6 MDNS | Capture missed loopback; recapture with Npcap |
+
+Do **not** `editcap -T rawip` on a file `capinfos` already calls Ethernet — that eats the first 14 bytes of each frame. Search the `data` payload instead.
 
 **2. If TCP is present: Decode As HTTP on 1013**
 
@@ -371,13 +374,15 @@ tshark (two-pass so requests split across segments still reassemble):
 tshark -2 -r oxp-1013.pcap -d tcp.port==1013,http -Y "http.request.method == POST" -T fields -e frame.number -e http.request.uri
 ```
 
-**3. If it is only raw: ignore HTTP, search ASCII**
+**3. If it is only raw (`eth:ethertype:data`): ignore HTTP, search ASCII**
 
 The POST line is still `POST /msr/setCpuPl/…` in the payload. Do not
-wait for a dissector.
+wait for a dissector. On a Packet Monitor file the bytes live in
+`data.text`, not `http.request.uri`.
 
 ```bat
 tshark -r oxp-1013.pcap -Y "frame contains \"POST /\"" -T fields -e frame.number -e frame.len
+tshark -r oxp-1013.pcap -Y "data.text contains \"POST /\"" -T fields -e frame.number -e data.text
 ```
 
 PowerShell (works on pktmon “raw” and on Npcap loopback):
