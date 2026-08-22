@@ -34,6 +34,8 @@ kmod/scripts/ec-stack.sh                  # should print oxp-wmi
 kmod/scripts/apply-all.sh                 # make linux/oxp-wmi/oxp-wmi.ko
 sudo kmod/scripts/test-oxp-wmi.sh
 sudo kmod/scripts/install-oxp-wmi.sh      # /var/lib/oxp-kmod + systemd
+# Bazzite: if the unit says Permission denied, SELinux blocked
+# /var/lib/*.ko. The installer now relabels modules_object_t.
 sudo kmod/scripts/install-inputplumber.sh
 sudo kmod/scripts/install-tdp-rapl.sh     # TdpLimit1 → RAPL; no-op on AMD
 ```
