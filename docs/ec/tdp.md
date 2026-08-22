@@ -118,6 +118,8 @@ performance” are the named writes above (`intelpnp/…`,
 time-varying PL1 (and maybe those same writes). How to confirm which
 POST the slider actually sends:
 [onexconsole-api.md — capture](onexconsole-api.md#how-to-capture-posts-windows).
+Live 58 s slider pcap: only `/msr/setCpuPl/{11,37,45}/…/4` plus sensor /
+HID / display gets. No `intelpnp` / `powerplan` / `setCpuMaxStatusPercent`.
 Full table: [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md).
 
 ### Behind `type=4` (not an HTTP route)
