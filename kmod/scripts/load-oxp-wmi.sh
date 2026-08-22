@@ -2,8 +2,9 @@
 # Load /var/lib/oxp-kmod/oxp-wmi.ko. Used by oxp-wmi-local.service.
 # Bazzite SELinux: systemd (init_t) cannot insmod a var_lib_t .ko — that is
 # EACCES "Permission denied". A login `sudo insmod` is unconfined and works.
-# Relabel to modules_object_t before insert. Do not use `modprobe -r` here:
-# the module is not in modules.dep, so that only prints "not found".
+# Relabel only the .ko to modules_object_t. Do not label this script (or the
+# directory) as a kernel module — systemd then fails with 203/EXEC.
+# Do not use `modprobe -r` here: the module is not in modules.dep.
 set -euo pipefail
 
 DEST_DIR="${DEST_DIR:-/var/lib/oxp-kmod}"
@@ -36,8 +37,10 @@ if ! insmod "${KO}" "${extra[@]+"${extra[@]}"}"; then
   fi
   echo "If this is Permission denied on Bazzite: SELinux on /var/lib/*.ko." >&2
   echo "  sudo chcon -t modules_object_t ${KO}" >&2
-  echo "  sudo semanage fcontext -a -t modules_object_t '/var/lib/oxp-kmod(/.*)?'" >&2
+  echo "  sudo semanage fcontext -d '/var/lib/oxp-kmod(/.*)?' || true" >&2
+  echo "  sudo semanage fcontext -a -t modules_object_t '${DEST_DIR}(/.*)?\\.ko'" >&2
   echo "  sudo restorecon -Rv ${DEST_DIR}" >&2
+  echo "Do not label ${DEST_DIR} or this script as modules_object_t (203/EXEC)." >&2
   exit 1
 fi
 lsmod | grep -E '^oxp_wmi'

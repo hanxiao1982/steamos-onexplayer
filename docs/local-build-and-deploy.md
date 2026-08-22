@@ -211,7 +211,8 @@ Failure table:
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `Invalid module format` | vermagic ≠ `uname -r` | rebuild against matching headers |
-| `insmod … Permission denied` from `oxp-wmi-local.service` | Bazzite SELinux: systemd cannot load a `var_lib_t` `.ko`. `sudo test-oxp-wmi.sh` still works (unconfined). | Re-run `install-oxp-wmi.sh` (relabels `modules_object_t`). Or: `sudo chcon -t modules_object_t /var/lib/oxp-kmod/oxp-wmi.ko` |
+| `insmod … Permission denied` from `oxp-wmi-local.service` | Bazzite SELinux: systemd cannot load a `var_lib_t` `.ko`. `sudo test-oxp-wmi.sh` still works (unconfined). | Re-run `install-oxp-wmi.sh` (relabels **only** `*.ko` to `modules_object_t`). Or: `sudo chcon -t modules_object_t /var/lib/oxp-kmod/oxp-wmi.ko` |
+| `203/EXEC` / `Unable to locate executable …/load-oxp-wmi.sh: Permission denied` | The previous installer labeled the **whole** `/var/lib/oxp-kmod` tree `modules_object_t`, including the loader. systemd cannot exec a kernel-module type. | Pull and re-run `install-oxp-wmi.sh`. Loader is `/etc/oxp-kmod/load-oxp-wmi.sh` via `/bin/bash`. `semanage fcontext -d '/var/lib/oxp-kmod(/.*)?'` removes the old rule. |
 | `modprobe: FATAL: Module oxp_wmi not found` in the unit | Harmless if it is only `ExecStartPre`. The module is loaded with `insmod`, not `modules.dep`. | Ignore, or pull the unit that uses `rmmod` / `load-oxp-wmi.sh` |
 | `Key was rejected by service` / `Required key not available` | Secure Boot | disable SB, or sign with a MOK |
 | `insmod` succeeds but no hwmon | `board_name` mismatch, or looking for `oxpec` on X2 Mini | X2 Mini hwmon name is `oxp_wmi`; rerun `collect-dmi.sh` on AMD |

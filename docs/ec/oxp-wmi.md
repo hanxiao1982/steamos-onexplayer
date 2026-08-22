@@ -33,9 +33,10 @@ X2 Mini (and other Intel G3E SKUs) go through the same `kmod/` deploy path as AM
 kmod/scripts/ec-stack.sh                  # should print oxp-wmi
 kmod/scripts/apply-all.sh                 # make linux/oxp-wmi/oxp-wmi.ko
 sudo kmod/scripts/test-oxp-wmi.sh
-sudo kmod/scripts/install-oxp-wmi.sh      # /var/lib/oxp-kmod + systemd
-# Bazzite: if the unit says Permission denied, SELinux blocked
-# /var/lib/*.ko. The installer now relabels modules_object_t.
+sudo kmod/scripts/install-oxp-wmi.sh      # /var/lib/oxp-kmod + /etc/oxp-kmod + systemd
+# Bazzite: systemd is init_t. Only the .ko is modules_object_t.
+# Labeling the loader or the whole /var/lib/oxp-kmod tree that way
+# is 203/EXEC ("Unable to locate executable … Permission denied").
 sudo kmod/scripts/install-inputplumber.sh
 sudo kmod/scripts/install-tdp-rapl.sh     # TdpLimit1 → RAPL; no-op on AMD
 ```
