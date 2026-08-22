@@ -461,14 +461,169 @@ One toggle per pcap. Write down: control name, before/after, file name.
 
 | You click | Paths to keep |
 |---|---|
+| **Cold start (no click)** | See section 7. `init*`, `/tdp/init`, first `setCpuPl` / `setCpuPl4`, `/powerplan/`, `/intelpnp/`. |
 | TDP slider | `/msr/setCpuPl/` only on live adapter-only X2 Mini. `/msr/setCpuPl4/` only if `0xE3` maps in `changePl4Func`. No `/tdp/` write. |
 | Turbo / CPU boost / max clock | `/powerplan/` |
 | Intel dynamic performance / Adaptive TDP / Follow FPS | `/intelpnp/`, `/power/setCpuMaxStatusPercent`, `/powerplan/`, `/msr/` — no `/dtt/` in the exe |
 | Fan / charge (sanity) | `/fan/`, `/battery/` — already mapped; use only to prove capture works |
 
-Ignore startup `init*` after the first boot capture. Decode init
+Ignore startup `init*` **after** you have one boot capture. Decode init
 addresses with `reg = encoded - 0x400` (1259 → `0xEB`). Live set routes
 are already human values (`40`, `25`, `true`).
+
+### 7. Startup capture (one shot)
+
+Slider-only pcaps miss boot work: `init*`, `/tdp/init`, IntelPowerPlugin
+bring-up, restored last TDP, and any one-shot `/powerplan/` /
+`/intelpnp/` / `setCpuPl4`. Capture **from before `OneXConsole.exe`
+starts** until the window is idle. Do not touch the TDP slider.
+
+**Already proven on this unit:** Packet Monitor pcapng is
+`eth:ethertype:data`. Do not wait for tshark HTTP. Extract ASCII with
+PowerShell. Prefer the same `pktmon --comp all` path that already
+worked, or Npcap loopback.
+
+#### A. HTTP mode must already work
+
+Admin **CMD** (not PowerShell — `echo` there writes UTF-16 and the exe
+ignores the file):
+
+```bat
+mkdir C:\Windows\OEM 2>nul
+if exist C:\Windows\OEM\app_config.json copy /y C:\Windows\OEM\app_config.json C:\Windows\OEM\app_config.json.bak
+echo { "isPipeMode": 0 } > C:\Windows\OEM\app_config.json
+type C:\Windows\OEM\app_config.json
+```
+
+`type` must show exactly `{ "isPipeMode": 0 }` on one line. Then start
+OneXConsole **once**, confirm, and only then kill it:
+
+```bat
+netstat -ano | findstr :1013
+curl -s -X POST http://127.0.0.1:1013/func/getOXPSetTdpAble
+```
+
+Need `LISTENING` on 1013 and a JSON `{ "code": 1, ... }`. Log line:
+`Layer run by webservice`. If 1013 is closed, stop here — startup
+capture will be empty.
+
+Write down before killing: AC vs battery, last TDP the UI showed.
+Adapter-only `0xE3` 16/18 still will not map `changePl4Func`; the
+question is whether boot sends `setCpuPl4` anyway.
+
+#### B. Stop the app so the next launch is a real start
+
+```bat
+taskkill /IM OneXConsole.exe /F
+taskkill /IM CompatLayerCT.exe /F
+timeout /t 2
+tasklist | findstr /I "OneXConsole CompatLayerCT"
+```
+
+`tasklist` must show neither. If OneXConsole is “start with Windows”
+or a helper relaunches it, disable that for this shot or the capture
+starts mid-init.
+
+#### C. Start capture, then start the app
+
+Admin CMD, working directory you will remember (`C:\Users\hanxiao`):
+
+```bat
+cd /d C:\Users\hanxiao
+pktmon filter remove
+pktmon filter add -t TCP -p 1013
+pktmon start --capture --pkt-size 0 --comp all
+```
+
+Now start OneXConsole from the Start menu (or the installed shortcut).
+Do **not** move TDP / Turbo / Adaptive / fan. Wait until the window is
+fully up, then **10 more seconds** (first `makeSetEffect` is ~1.5 s;
+plugin copy can take longer). About 20–40 s of UI-up time is enough.
+Longer only adds `getPowerSupplyMode` / temp / `listAllProcess` polls.
+
+```bat
+pktmon stop
+pktmon etl2pcap PktMon.etl -o oxp-1013-startup.pcap
+pktmon format PktMon.etl -o oxp-1013-startup.txt
+```
+
+Keep `PktMon.etl` until the POST list looks right.
+
+Npcap alternative: start Wireshark on **Adapter for loopback traffic
+capture**, filter `tcp port 1013`, start capture, *then* launch
+OneXConsole, then stop. Same extract below.
+
+#### D. Extract on the device (order + counts)
+
+`cmd.exe` tshark `data.text` / `\"` filters stay empty on this
+Packet Monitor file. Use PowerShell 7:
+
+```powershell
+$pcap = 'C:\Users\hanxiao\oxp-1013-startup.pcap'
+$text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pcap))
+$posts = [regex]::Matches($text, 'POST /[A-Za-z0-9_./-]+') | ForEach-Object { $_.Value }
+
+'--- chronological (first 120) ---'
+$i = 0
+foreach ($p in $posts) {
+  $i++
+  if ($i -gt 120) { break }
+  '{0,4}  {1}' -f $i, $p
+}
+
+'--- interesting only (msr/tdp/power/intel/init/set) ---'
+$posts | Where-Object {
+  $_ -match 'POST /(?:msr|tdp|powerplan|intelpnp|power/|func/(?:set|init)|fan/init|battery/init|battery/set)'
+}
+
+'--- counts ---'
+$posts | Group-Object | Sort-Object Count -Descending |
+  ForEach-Object { '{0,5}  {1}' -f $_.Count, $_.Name }
+```
+
+Optional: leftover JSON near battery/intel inits (bodies are not in the
+path):
+
+```powershell
+[regex]::Matches($text, 'POST /(?:battery/initEc|battery/initPowerSupplyModeEC|intelpnp/)[^\r\n]*[\s\S]{0,200}') |
+  ForEach-Object { $_.Value -replace '[^\x20-\x7E]+',' ' ; '----' }
+```
+
+Paste **chronological interesting lines + counts**. Do not upload the
+pcap. A good startup list should include most of:
+
+```
+POST /func/setECAccessType/2
+POST /func/initBaseEc/...
+POST /func/initHandleEc/...
+POST /func/initOXPSensorEc/...
+POST /fan/init/...
+POST /battery/initEc
+POST /battery/initPowerSupplyModeEC
+POST /tdp/init/8/45/46
+```
+
+New vs the 58 s slider pcap (those are the reason for this shot):
+
+| Path | Why we care |
+|---|---|
+| `/msr/setCpuPl4/{pl4}/4` | Boot-time PL4 despite unmapped `0xE3` 16/18? |
+| `/msr/setCpuPl/{pl1}/{pl2}/4` | Restored last slider, not a new gesture |
+| `/intelpnp/setOEMVarWithPowerScheme/{n}` | DTT-shaped OEM var |
+| `/powerplan/setCpuBoostMode/{0\|2}` | Turbo restore |
+| `/powerplan/setCpuMaxClock/{MHz}` | IA cap restore |
+| `/power/setCpuMaxStatusPercent/{n}` | Exe-only; JS 0.10.2-fix8 does not invoke it |
+| `/battery/setChargeLimit/` / `setByPassPowerMode/` | Saved charge policy writes |
+| anything else under `/msr/`, `/power`, `/intel` | Unknown — keep the full path |
+
+`IntelPowerPlugin init` is a **file copy** of `CCHWApiExt.sys` into
+`C:\Program Files\Intel Corporation\Intel(R)CCHWAPI\`, not an HTTP
+route. Absence of `/dtt/` is expected.
+
+If the interesting list is only the 1.6 s polls (`getPowerSupplyMode`,
+`getOXPSensorCpuTemp`, `listAllProcess`), capture started after init or
+HTTP mode was off. Re-check section A and start pktmon *before* the
+exe.
 
 Copy the **full path + JSON body** (often empty). `code == 1` is success.
 
