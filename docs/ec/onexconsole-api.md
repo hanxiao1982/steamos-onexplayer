@@ -299,45 +299,118 @@ curl -s -X POST http://127.0.0.1:1013/func/getOXPSetTdpAble
 
 Expect `{ "code": 1, "result": "..." }`. If curl fails, capture will be empty.
 
-### 2. Preferred: `pktmon` (built-in, no extra install)
+### 2. Preferred: Wireshark + Npcap loopback
+
+`127.0.0.1:1013` never hits a Wi-Fi / Ethernet NIC. Windows loopback is
+not NDIS, so `pktmon … --comp nics` usually captures **nothing useful**
+(or leftover LAN frames that look like “Raw packet”).
+
+Install Npcap with **loopback** support. Capture on **Adapter for
+loopback traffic capture**. Capture filter `tcp port 1013`. Same UI
+toggle, then Follow TCP Stream and look for `POST /`.
+
+Do not pick the Wi-Fi / Ethernet NIC.
+
+tshark will **not** auto-decode HTTP on port 1013. Force it, or search
+bytes (see “tshark says Raw packet / HTTP filter empty” below).
+
+### 3. `pktmon` (built-in; often raw, often misses loopback)
 
 Admin CMD. Do **one** UI gesture per capture so the POST is obvious.
 
 ```bat
 pktmon filter remove
 pktmon filter add -t TCP -p 1013
-pktmon start --capture --pkt-size 0 --comp nics
+pktmon start --capture --pkt-size 0 --comp all
 ```
 
-In OneXConsole, toggle **one** control (Intel dynamic performance, Turbo,
-TDP slider, CPU boost). Then:
+`--comp all` is required for a chance at localhost. `--comp nics` is the
+wrong layer for `127.0.0.1`. Even with `--comp all`, `etl2pcap` often
+emits packets with a bogus L2 header; Wireshark then shows **Raw packet
+data** and `http.request` is empty. That is a dissect problem, not proof
+the POST is missing.
 
 ```bat
 pktmon stop
 pktmon etl2pcap PktMon.etl -o oxp-1013.pcap
+pktmon format PktMon.etl -o oxp-1013.txt
+findstr /C:"POST /" oxp-1013.txt
 ```
 
-Open `oxp-1013.pcap` in Wireshark. Display filter:
+`pktmon format` dumps the ETL as text/hex and does not need an HTTP
+dissector. Keep the `.etl` until you have extracted `POST /` lines.
 
+### 4. tshark says Raw packet / HTTP filter empty
+
+Do this on the machine that has the pcap. Do **not** rename the file
+`.jpg` and upload it — the binary will not land here.
+
+**1. See what tshark actually thinks the packets are**
+
+```bat
+capinfos oxp-1013.pcap
+tshark -r oxp-1013.pcap -T fields -e frame.number -e frame.protocols -e frame.len -c 20
 ```
-tcp.port == 1013 && http.request.method == "POST"
+
+Typical bad cases:
+
+| `frame.protocols` | Meaning |
+|---|---|
+| `eth:ethertype:ip:tcp` (no `http`) | TCP is fine; HTTP not bound to port 1013 |
+| `eth:data` / `data` / “Raw packet data” | L2/L3 headers wrong (common after `etl2pcap`) |
+| empty / only ARP / IPv6 MDNS | Capture missed loopback; recapture with Npcap |
+
+**2. If TCP is present: Decode As HTTP on 1013**
+
+Wireshark: right-click a 1013 frame → **Decode As…** → TCP port 1013 →
+HTTP.
+
+tshark (two-pass so requests split across segments still reassemble):
+
+```bat
+tshark -2 -r oxp-1013.pcap -d tcp.port==1013,http -Y "http.request.method == POST" -T fields -e frame.number -e http.request.uri
 ```
 
-If Wireshark does not decode HTTP (chunked WCF), follow the TCP stream
-(`Follow` → `TCP Stream`) and look for `POST /`.
+**3. If it is only raw: ignore HTTP, search ASCII**
 
-`PktMon.etl` lands in the current directory. Convert is optional; Wireshark
-can also open the etl after `etl2pcap`.
+The POST line is still `POST /msr/setCpuPl/…` in the payload. Do not
+wait for a dissector.
 
-### 3. Wireshark + Npcap loopback
+```bat
+tshark -r oxp-1013.pcap -Y "frame contains \"POST /\"" -T fields -e frame.number -e frame.len
+```
 
-Install Npcap with **loopback** support. Capture on
-**Adapter for loopback traffic capture**. Filter `tcp.port == 1013`.
-Same UI toggle, then `http.request.method == "POST"` or Follow TCP Stream.
+PowerShell (works on pktmon “raw” and on Npcap loopback):
 
-Do not pick the Wi-Fi / Ethernet NIC — this traffic never leaves the box.
+```powershell
+$pcap = 'C:\path\to\oxp-1013.pcap'
+$text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pcap))
+[regex]::Matches($text, 'POST /[A-Za-z0-9_./-]+') |
+  ForEach-Object { $_.Value } |
+  Group-Object |
+  Sort-Object Count -Descending |
+  ForEach-Object { '{0,5}  {1}' -f $_.Count, $_.Name }
+```
 
-### 4. If you must stay on the pipe
+If that list is empty, the pcap does not contain the OneXConsole POSTs.
+Recapture on the Npcap loopback adapter (section 2), after
+`isPipeMode: 0` and a working
+`curl -s -X POST http://127.0.0.1:1013/func/getOXPSetTdpAble`.
+
+**4. Optional: restamp a raw-IP pcap so tshark grows TCP/HTTP layers**
+
+Only if `capinfos` says the link type is raw / user / unknown:
+
+```bat
+editcap -T rawip oxp-1013.pcap oxp-rawip.pcap
+tshark -2 -r oxp-rawip.pcap -d tcp.port==1013,http -Y "http.request.method == POST" -T fields -e http.request.uri
+```
+
+If `editcap -T rawip` makes it worse, try `-T linux-sll` or just stay
+with the ASCII extract. Paste the unique `POST /…` lines (and any JSON
+body on the next few lines). Do not send the pcap.
+
+### 5. If you must stay on the pipe
 
 Default `isPipeMode=1` uses `\\.\pipe\CompatLayerCT` (same URL paths, not
 HTTP). Wireshark will see nothing on 1013.
@@ -350,7 +423,7 @@ HTTP). Wireshark will see nothing on 1013.
 
 There is no public `/ECRamReadByte` HTTP route to watch instead.
 
-### 5. What to click, what to keep
+### 6. What to click, what to keep
 
 One toggle per pcap. Write down: control name, before/after, file name.
 
