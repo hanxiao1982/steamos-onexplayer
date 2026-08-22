@@ -330,11 +330,12 @@ There is **no** tau / `time_window` / `long_term` argument on these routes.
 clamp-enable bits). Firmware PL1 window stays at the BIOS default
 (~28 s on live X2 Mini `constraint_0_time_window_us=27983872`).
 `changePl4Func` is adapter-class / PL4, not a window write. Adapter-only
-`0xE3` 16/18 → no `setCpuPl4`. Battery + mapped key → `setCpuPl4` on
+`0xE3` 16/18 → no HTTP `setCpuPl4`. Battery + mapped key → `setCpuPl4` on
 every slider move and every adapter swap, value 160 or 120 (or 65),
-independent of PL1. Linux still interpolates PL4 70–160 W with the
-slider (BIOS 55 W clips GT); that is **not** this HTTP. Leave
-`time_window_us` alone. See [tdp.md](tdp.md#onexconsole-and-long_term-tau).
+independent of PL1. Linux `oxp-tdp-rapl` uses the same table (and the
+16→8 / 18→2 normalize so adapter-only is not stuck on BIOS 55 W). Leave
+`time_window_us` alone. See
+[tdp.md — Linux TDP policy](tdp.md#linux-tdp-policy-onexconsole-clone).
 
 ## How to capture POSTs (Windows)
 

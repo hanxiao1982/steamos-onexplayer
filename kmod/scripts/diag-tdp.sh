@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dump Intel RAPL + TdpLimit1 state. Optional --set / --measure for the load test.
-# --set applies the same policy as oxp-tdp-rapl (MSR+MMIO PL1/PL2/PL4, GT range;
-# firmware PL1 tau, same as OneXConsole). Do not tee only intel-rapl:0 —
+# --set applies the same policy as oxp-tdp-rapl (MSR+MMIO PL1/PL2, adapter-class
+# PL4 from 0xE3, GT range; firmware PL1 tau). Do not tee only intel-rapl:0 —
 # PCODE/GPU follow MMIO.
 set -euo pipefail
 
@@ -113,8 +113,21 @@ echo "sys_vendor=$(read_dmi sys_vendor)"
 echo "product_name=$(read_dmi product_name)"
 echo "board_name=$(read_dmi board_name)"
 
+echo "=== 0xE3 power_supply_mode (PL4 class) ==="
+shopt -s nullglob
+e3_files=(/sys/bus/wmi/devices/*/power_supply_mode)
+shopt -u nullglob
+if ((${#e3_files[@]})); then
+  for f in "${e3_files[@]}"; do
+    echo -n "$f: "
+    tr -d '\n' <"$f"; echo
+  done
+else
+  echo "(oxp-wmi power_supply_mode not present)"
+fi
+
 echo "=== modules ==="
-lsmod | grep -E 'intel_rapl|rapl' || echo "(no intel_rapl* in lsmod)"
+lsmod | grep -E 'intel_rapl|rapl|oxp_wmi' || echo "(no intel_rapl*/oxp_wmi in lsmod)"
 
 if [[ -n "$SET_W" ]]; then
   if [[ "${EUID}" -ne 0 ]]; then

@@ -21,9 +21,9 @@ Steam → steamos-manager TdpLimit1 → remotes.d oxp-rapl.toml
       → com.steampowered.OxpRapl.Tdp → intel-rapl PL1 (+ PL2 = PL1+1 W)
 ```
 
-Slider range for X2 Mini: Linux remote **8–45 W**, default **25 W**
-(the daemon reports the current PL1 if it already sits in range). Live
-OneXConsole `/tdp/init/3/45/46` uses UI min **3**.
+Slider range for X2 Mini: **3–45 W**, default **25 W** (live
+`/tdp/init/3/45/46`). The daemon reports the current PL1 if it already
+sits in range.
 
 Installing the remote does **not** prove RAPL *enforcement*. Confirm that
 separately under load (`diag-tdp.sh --set` 15 then 40). Overlay CPU watts are
@@ -75,10 +75,11 @@ CompatLayerCT type 4 is Intel DTT/IPF (or a raw MSR write of
 “feels” like the slider matches because DTT/PCODE also steers GT, not
 because they set a 2 s window.
 
-**Replicable on Linux:** write PL1/PL2/PL4 watts on `intel-rapl:0` **and**
-`intel-rapl-mmio:0`; do **not** write `constraint_*_time_window_us`. The
-daemon only restores ~28 s if a previous build left a 2 s leftover.
-`OXP_TDP_PL1_WINDOW_US` is an explicit diag override, not the default.
+**Replicable on Linux:** write PL1/PL2 and adapter-class PL4 on
+`intel-rapl:0` **and** `intel-rapl-mmio:0`; do **not** write
+`constraint_*_time_window_us`. The daemon only restores ~28 s if a
+previous build left a 2 s leftover. `OXP_TDP_PL1_WINDOW_US` is an
+explicit diag override, not the default.
 
 **Not a OneXConsole clone:** shortening tau, or interpolating GT
 `max_freq`, only changes how Linux *looks*. Windows split is DTT, not RAPL
@@ -162,7 +163,7 @@ the DTT / powerplan POSTs against that dump before writing any of them.
 Live `ONEXPLAYER X2Mini` (Bazzite): package `long_term` `max_power_uw` is 25 W,
 but `diag-tdp.sh --set 40` read back 40 W / 45 W PL1/PL2. That sysfs max is a
 BIOS default, not a write ceiling. The daemon therefore clamps only to the
-Steam slider range (8–45 W). `energy_uj` is `0400` root-only, so the overlay
+Steam slider range (3–45 W on X2 Mini). `energy_uj` is `0400` root-only, so the overlay
 often shows 0 W.
 
 `diag-tdp.sh` over SSH cannot see session `SteamOSManager1` (no user bus).
@@ -222,6 +223,25 @@ and reinstall, or start once with `OXP_TDP_WAIT_MANAGER=0` **after** the
 user manager is already up (do not leave that env on across reboot — 26.3
 deadlock).
 
+## Linux TDP policy (OneXConsole clone)
+
+`oxp-tdp-rapl` now follows the live battery + 65/100 W POST sequence, not
+an interpolated PL4.
+
+| Step | OneXConsole | Linux remote |
+|---|---|---|
+| PL1 | slider W | same |
+| PL2 | PL1+1 (`11/12` … `45/46`) | same (`PL2_HEADROOM_W=1`) |
+| PL4 | `changePl4Func(0xE3)` **before** PL1/PL2: keys `1–5` → 160, `9` → 120, `8` → 65. Independent of the slider (11 W still 160 on 100 W) | same table. Read `0xE3` from oxp-wmi `power_supply_mode` (or `debugfs` `ec0/io`). `OXP_TDP_PL4` / `OXP_TDP_E3` override |
+| Unmapped 16/18 | JS HTTP skips `setCpuPl4` | same **table** after firmware normalize `16→8` (65 W), `18→2` (160 W). Leaving BIOS 55 W clips GT |
+| Key 8 clamp | slider 25/26 | writes clamp to 25 W. Steam `TdpLimitMax` stays 45 |
+| Key 9 | PL4 120, slider still 3–45 | same |
+| tau | not written | not written (restore ~28 s if a previous daemon left 2 s) |
+| GT `max_freq` | none (DTT / type 4) | still a Linux-only RPe→RP0 lerp |
+
+`diag-tdp.sh` prints the `power_supply_mode` line next to RAPL so PL4
+class is visible.
+
 ## What this does not do
 
 - GPU clock slider (`GpuPerformanceLevel1`) — X2 Mini Windows UI has no manual
@@ -231,12 +251,9 @@ deadlock).
   ~15 W is that gap, not a failed PL1 write.
 - Fan (`FanControl1` is already on the bus on the live unit; wiring it to
   `oxp_wmi` pwm is a separate job).
-- PL4 / adapter-class tables (`0xE3`). Windows: **160** on 100 W (any
-  slider, including 11 W), **120** on 65 W+battery; skip HTTP PL4 on
-  adapter-only 16/18. Linux still interpolates 70–160 W with the slider
-  so mid-TDP does not pin GT at RP0 — not a clone of that HTTP.
-- CPU vs GPU **share** (DTT Power Share, `/powerplan/*`, SoC slider). Package
-  PL1 is only the ceiling. See [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1).
+- CPU vs GPU **share** (DTT Power Share, `/powerplan/*` after boot, SoC
+  slider). Package PL1 is only the ceiling. See
+  [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1).
 - `oxp-wmi` / EC `0xED`.
 
 ## If games stay ~15 W with GPU ≤ 1.5 GHz
@@ -255,7 +272,7 @@ sudo kmod/scripts/diag-gpu.sh
 | What you see | Meaning |
 |---|---|
 | `max_freq` (or `gt_max_freq_mhz`) ≈ 1500, `rp0` ≈ 2300 | Linux GT max request is capped; try `sudo kmod/scripts/diag-gpu.sh --raise-max` |
-| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 too low** (BIOS 55 W). Windows on 100 W writes PL4 **160 at every slider position** (live `setCpuPl4/160` + `setCpuPl/11/12`). Linux interpolates 70–160 so a low slider does not also pin GT at RP0. |
+| `max_freq` already = `rp0`, `act_freq` still ~1500, `throttle/reason_pl4=1` | **PL4 too low** (BIOS 55 W). Windows on 100 W writes PL4 **160 at every slider** (`setCpuPl4/160` + `setCpuPl/11/12`). The remote now does the same from `0xE3`. |
 | A **non-** `intel-rapl:0` powercap zone still at ~15 W | `processor_thermal_rapl` / DPTF, not our TdpLimit1 writer |
 | Overlay 15 W but `diag-tdp.sh --measure` much higher | Overlay telemetry (often `energy_uj` 0400 or i915/xe), not package RAPL |
 
@@ -265,9 +282,9 @@ unit because `energy_uj` is root-only.
 
 Live X2 Mini (same game, PL1 already 45 W): BIOS PL4 55 W → `act_freq=1400`,
 `reason_pl4=1`, package ~14.8 W. Writing `peak_power=160 W` cleared the clip
-(`act_freq=2300`, ~32.6 W) but that is only the **top** of the slider — a
-constant 160 W lets GuC sit at RP0. The remote now interpolates PL4 70–160 W
-and GT0 `max_freq` RPe→RP0 with TDP, and **always** sets `min_freq=RPe`
-(Xe `max<=min` would pin a single clock). At 45 W under load, 2.3 GHz is
-boost; desktop/idle `act_freq` should fall toward ~1.0 GHz. Reboot restores
-BIOS 55 W PL4 unless `oxp-tdp-rapl` is installed.
+(`act_freq=2300`, ~32.6 W). OneXConsole keeps that 160 W (or 120 W on
+65 W+battery) at every slider position. GT0 `max_freq` is still a Linux-only
+RPe→RP0 lerp; `min_freq` is always RPe (Xe `max<=min` would pin a clock).
+At 45 W under load, 2.3 GHz is boost; desktop/idle `act_freq` should fall
+toward ~1.0 GHz. Reboot restores BIOS 55 W PL4 unless `oxp-tdp-rapl` is
+running.

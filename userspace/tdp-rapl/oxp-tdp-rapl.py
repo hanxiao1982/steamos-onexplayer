@@ -3,7 +3,9 @@
 
 Steam hides the TDP slider until TdpLimit1 exists on the session bus.
 This process owns a system-bus name; remotes.d tells steamos-manager to
-relay TdpLimit1 here. Watts go to powercap intel-rapl, not oxp-wmi / EC.
+relay TdpLimit1 here. PL1/PL2/PL4 go to powercap intel-rapl (OneXConsole
+`setCpuPl` / `setCpuPl4`). PL4 is read from EC `0xE3` via oxp-wmi, not
+lerped with the slider.
 
 Not a production TDP controller. RAPL enforcement is not proven by this
 file existing — use kmod/scripts/diag-tdp.sh under load.
@@ -20,10 +22,10 @@ POWERCAP = Path("/sys/class/powercap")
 DMI_PRODUCT = Path("/sys/class/dmi/id/product_name")
 DMI_SYS_VENDOR = Path("/sys/class/dmi/id/sys_vendor")
 
-# OneXConsole Intel G3E slider bounds (watts). X2 Mini is live-documented.
+# OneXConsole Intel G3E slider bounds (watts). X2 Mini live `/tdp/init/3/45/46`.
 # min is a floor for the Steam slider, not a firmware measurement.
 PRODUCT_WATTS = {
-    "ONEXPLAYER X2Mini": (8, 45, 25),
+    "ONEXPLAYER X2Mini": (3, 45, 25),
     "ONEXPLAYER X2": (8, 40, 25),
     "ONEXPLAYER X2 EVA": (8, 40, 25),
     "ONEXPLAYER 3": (8, 40, 25),
@@ -31,21 +33,27 @@ PRODUCT_WATTS = {
     "ONEXPLAYER Apex i": (8, 46, 25),
 }
 
-# OneXConsole changePl4Func: keys 1–5 → 160 W, 9 → 120, 8 → 65.
-# That 160 W is the *top* of the TDP slider, not a constant. BIOS peak_power
-# 55 W false-trips Xe reason_pl4 (~1.4 GHz). Always writing 160 W lets GuC
-# sit at RP0 (2.3 GHz). Scale PL4 with PL1; keep GT min at RPe so clocks move.
-PRODUCT_PL4 = {
-    "ONEXPLAYER X2Mini": 160,
-    "ONEXPLAYER X2": 160,
-    "ONEXPLAYER X2 EVA": 160,
-    "ONEXPLAYER 3": 160,
-    "ONEXPLAYER Apex Air": 160,
-    "ONEXPLAYER Apex i": 160,
+# background.js changePl4Func(e): 1|2|3|4|5 → 160, 9 → 120, 8 → 65, else void.
+# Live battery pcap: PL4 is this adapter class on every slider move, not a
+# function of PL1 (11 W still posted setCpuPl4/160). Key 8 also clamps the
+# slider to 25/26; key 9 (65 W+battery, PL4 120) does not.
+# Firmware 0xE3 16/18 are missing from the JS table (no HTTP setCpuPl4).
+# Linux applies the same table after oxp-key normalize (16→8, 18→2) so
+# adapter-only still gets 65/160 instead of leaving BIOS 55 W (clips GT).
+CHANGE_PL4_FUNC = {
+    1: 160,
+    2: 160,
+    3: 160,
+    4: 160,
+    5: 160,
+    8: 65,
+    9: 120,
 }
+KEY8_SLIDER_MAX_W = 25
 DEFAULT_PL4_W = 160
-PL4_LO_W = 70
 PL4_FALLBACKS = (160, 120, 90, 70)
+EC_POWER_SUPPLY = 0xE3
+EC_SYS_IO = Path("/sys/kernel/debug/ec/ec0/io")
 DRM_CLASS = Path("/sys/class/drm")
 
 BUS_NAME = "com.steampowered.OxpRapl.Tdp"
@@ -130,6 +138,86 @@ def dmi_sys_vendor() -> str:
 
 def watts_for_product(product: str) -> tuple[int, int, int] | None:
     return PRODUCT_WATTS.get(product)
+
+
+def oxp_key_from_e3(e3: int) -> int:
+    """Map live 0xE3 to the oxp key changePl4Func understands.
+
+    JS HTTP uses the raw byte and therefore skips 16/18. Firmware sets
+    bit4 on adapter-only; same normalize as oxp-wmi `power_supply_mode`.
+    """
+    if e3 in (500, 501):
+        return 1
+    if e3 == 16:
+        return 8
+    if e3 == 18:
+        return 2
+    return int(e3)
+
+
+def change_pl4_func(key: int) -> int | None:
+    """OneXConsole `changePl4Func` — adapter-class PL4, or None if unmapped."""
+    return CHANGE_PL4_FUNC.get(int(key))
+
+
+def parse_power_supply_mode(text: str) -> int | None:
+    """First field of oxp-wmi `power_supply_mode` is raw 0xE3."""
+    parts = text.split()
+    if not parts:
+        return None
+    try:
+        return int(parts[0], 0)
+    except ValueError:
+        return None
+
+
+def read_e3() -> int | None:
+    """Live EC 0xE3. OXP_TDP_E3 overrides (tests / no oxp-wmi)."""
+    env = os.environ.get("OXP_TDP_E3", "").strip()
+    if env:
+        try:
+            return int(env, 0)
+        except ValueError:
+            pass
+    root = Path("/sys/bus/wmi/devices")
+    if root.is_dir():
+        for path in sorted(root.glob("*/power_supply_mode")):
+            try:
+                e3 = parse_power_supply_mode(_read_text(path))
+            except OSError:
+                continue
+            if e3 is not None:
+                return e3
+    try:
+        blob = EC_SYS_IO.read_bytes()
+    except OSError:
+        blob = b""
+    if len(blob) > EC_POWER_SUPPLY:
+        return blob[EC_POWER_SUPPLY]
+    return None
+
+
+def pl4_from_e3(e3: int | None) -> int:
+    """Adapter-class PL4. OXP_TDP_PL4 overrides. Does not follow the slider."""
+    env = os.environ.get("OXP_TDP_PL4", "").strip()
+    if env.isdigit():
+        return int(env)
+    if e3 is None:
+        return DEFAULT_PL4_W
+    mapped = change_pl4_func(e3)
+    if mapped is not None:
+        return mapped
+    return change_pl4_func(oxp_key_from_e3(e3)) or DEFAULT_PL4_W
+
+
+def clamp_tdp_for_e3(watts: int, e3: int | None) -> int:
+    """Key 8 (65 W adapter, no battery) clamps the slider to 25 W in JS."""
+    if e3 is None:
+        return watts
+    key = e3 if change_pl4_func(e3) is not None else oxp_key_from_e3(e3)
+    if key == 8:
+        return min(int(watts), KEY8_SLIDER_MAX_W)
+    return watts
 
 
 def _zone_name(zone: Path) -> str:
@@ -325,7 +413,8 @@ def apply_watts(
     max reads 25 W while a 40 W write still sticks. Clamp only to the Steam
     slider range (max_w). If the kernel rejects the write, retry at sysfs max.
 
-    PL4 is scaled with PL1 (70–160 W). A constant 160 W lets GuC sit at RP0.
+    PL4 is the adapter-class wattage from changePl4Func (160/120/65), not a
+    lerp of PL1. Callers pass that in; 11 W + 160 W is the live Windows pair.
     """
     if zone_enabled(zone) is False:
         set_zone_enabled(zone, True)
@@ -392,13 +481,13 @@ def apply_package_watts(watts: int, max_w: int, pl4_w: int | None = None) -> int
     return last
 
 
-def apply_tdp_policy(
-    watts: int, tdp_min: int, tdp_max: int, pl4_hi: int | None = None
-) -> int:
-    pl4 = pl4_for_tdp(watts, tdp_min, tdp_max, pl4_hi)
+def apply_tdp_policy(watts: int, tdp_min: int, tdp_max: int) -> int:
+    e3 = read_e3()
+    watts = clamp_tdp_for_e3(watts, e3)
+    pl4 = pl4_from_e3(e3)
     wrote = apply_package_watts(watts, tdp_max, pl4_w=pl4)
-    apply_gt_range(watts, tdp_min, tdp_max)
-    print(f"TDP policy PL1={wrote} W PL4={pl4} W", flush=True)
+    apply_gt_range(wrote, tdp_min, tdp_max)
+    print(f"TDP policy PL1={wrote} W PL4={pl4} W e3={e3}", flush=True)
     return wrote
 
 
@@ -407,19 +496,6 @@ def lerp_int(x: int, x0: int, x1: int, y0: int, y1: int) -> int:
         return y1
     x = clamp_w(x, x0, x1)
     return y0 + (y1 - y0) * (x - x0) // (x1 - x0)
-
-
-def pl4_for_tdp(tdp: int, tdp_min: int, tdp_max: int, pl4_hi: int | None = None) -> int:
-    """PL4 follows the TDP slider. Constant 160 W pins GT at RP0."""
-    env = os.environ.get("OXP_TDP_PL4", "").strip()
-    if env.isdigit():
-        return int(env)
-    hi = pl4_hi if pl4_hi is not None else DEFAULT_PL4_W
-    return lerp_int(tdp, tdp_min, tdp_max, PL4_LO_W, hi)
-
-
-def pl4_hi_for_product(product: str) -> int:
-    return PRODUCT_PL4.get(product, DEFAULT_PL4_W)
 
 
 def _read_mhz(path: Path) -> int | None:
@@ -495,6 +571,15 @@ def dump_rapl(root: Path = POWERCAP) -> str:
     pkg = package_zone(root)
     if pkg is not None:
         lines.append(f"package zone: {pkg}")
+    e3 = read_e3()
+    if e3 is not None:
+        key = oxp_key_from_e3(e3)
+        lines.append(
+            f"0xE3={e3} oxp={key} PL4={pl4_from_e3(e3)} W "
+            f"(changePl4Func adapter class)"
+        )
+    else:
+        lines.append(f"0xE3 unread; PL4 fallback {DEFAULT_PL4_W} W")
     return "\n".join(lines) + "\n"
 
 
@@ -618,12 +703,35 @@ def run_self_test() -> int:
         assert desired_pl1_window_us(27_983_872) == 1_000_000
     finally:
         del os.environ["OXP_TDP_PL1_WINDOW_US"]
+    for k in ("OXP_TDP_PL4", "OXP_TDP_E3"):
+        os.environ.pop(k, None)
     assert lerp_int(8, 8, 45, 70, 160) == 70
     assert lerp_int(45, 8, 45, 70, 160) == 160
     assert lerp_int(8, 8, 45, 1000, 2300) == 1000
     assert lerp_int(45, 8, 45, 1000, 2300) == 2300
-    assert pl4_for_tdp(45, 8, 45, 160) == 160
-    assert pl4_for_tdp(8, 8, 45, 160) == 70
+    assert change_pl4_func(3) == 160
+    assert change_pl4_func(9) == 120
+    assert change_pl4_func(8) == 65
+    assert change_pl4_func(16) is None
+    assert change_pl4_func(18) is None
+    assert oxp_key_from_e3(16) == 8
+    assert oxp_key_from_e3(18) == 2
+    assert oxp_key_from_e3(9) == 9
+    assert oxp_key_from_e3(500) == 1
+    assert pl4_from_e3(3) == 160
+    assert pl4_from_e3(9) == 120
+    assert pl4_from_e3(8) == 65
+    assert pl4_from_e3(16) == 65
+    assert pl4_from_e3(18) == 160
+    assert pl4_from_e3(None) == DEFAULT_PL4_W
+    assert clamp_tdp_for_e3(45, 8) == 25
+    assert clamp_tdp_for_e3(45, 16) == 25
+    assert clamp_tdp_for_e3(45, 9) == 45
+    assert clamp_tdp_for_e3(11, 3) == 11
+    assert parse_power_supply_mode("18 typec-100w oxp=2 batt=0") == 18
+    wrote = apply_watts(z, 11, 45, pl4_w=160)
+    assert wrote == 11
+    assert _read_text(z / "constraint_2_power_limit_uw") == "160000000"
     g = root / "card1" / "device" / "tile0" / "gt0" / "freq0"
     g.mkdir(parents=True)
     (g / "rpe_freq").write_text("1000\n")
@@ -642,9 +750,7 @@ def run_self_test() -> int:
     return 0
 
 
-def serve_dbus(
-    zone: Path, min_w: int, max_w: int, current_w: int, pl4_hi: int = DEFAULT_PL4_W
-) -> None:
+def serve_dbus(zone: Path, min_w: int, max_w: int, current_w: int) -> None:
     import dbus
     import dbus.exceptions
     import dbus.mainloop.glib
@@ -666,7 +772,7 @@ def serve_dbus(
 
         def _set_tdp(self, watts: int) -> None:
             watts = clamp_w(int(watts), self.min_w, self.max_w)
-            self.cur_w = apply_tdp_policy(watts, self.min_w, self.max_w, pl4_hi)
+            self.cur_w = apply_tdp_policy(watts, self.min_w, self.max_w)
             print(f"TDP -> {self.cur_w} W (PL1)", flush=True)
 
         def _refresh_from_sysfs(self) -> None:
@@ -806,7 +912,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.set is not None:
         w = clamp_w(args.set, min_w, max_w)
-        wrote = apply_tdp_policy(w, min_w, max_w, pl4_hi=pl4_hi_for_product(product))
+        wrote = apply_tdp_policy(w, min_w, max_w)
         print(f"wrote PL1={wrote} W")
         print(dump_rapl(), end="")
         return 0
@@ -817,9 +923,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         current_w = cur
 
-    pl4_hi = pl4_hi_for_product(product)
     try:
-        apply_tdp_policy(current_w, min_w, max_w, pl4_hi=pl4_hi)
+        apply_tdp_policy(current_w, min_w, max_w)
     except (OSError, RuntimeError) as e:
         print(f"initial RAPL apply: {e}", file=sys.stderr)
 
@@ -841,7 +946,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     try:
-        serve_dbus(zone, min_w, max_w, current_w, pl4_hi=pl4_hi)
+        serve_dbus(zone, min_w, max_w, current_w)
     except KeyboardInterrupt:
         return 0
     return 0
