@@ -62,7 +62,7 @@ Windows OneXConsole 0.10.2-fix8 never takes a tau argument:
 
 | Call | What it writes |
 |---|---|
-| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | PL1 / PL2 **watts** (`intelTdpSetType=4` on G3E) |
+| `/msr/setCpuPl/{pl1}/{pl2}/{type}` | Live: `/msr/setCpuPl/37/38/4`. PL1 = slider, PL2 = PL1+1 (45→46), type 4 = IntelPowerPlugin (MSR+MMIO), not a watt. |
 | `/msr/setCpuPl4/{pl4}/{type}` | PL4 watts |
 | `/tdp/init/{min}/{max}/{maxBoost}` | UI slider bounds only |
 | `/func/getOXPSetTdpAble` | EC `0xED` gate read (stays 0; TDP is not EC) |
@@ -97,7 +97,7 @@ eats that ceiling is a second policy layer.
 
 | Interface | What it actually does to the split |
 |---|---|
-| `/msr/setCpuPl/{pl1}/{pl2}/{type}` **`type`** | G3E hard-codes `intelTdpSetType=4`. That is **not** “raw MSR PL1”. Type 4 is the Intel DTT / IPF write path. Types other than 4 are not documented here; do not assume 4 ≡ `powercap` `constraint_*_power_limit_uw`. |
+| `/msr/setCpuPl/{pl1}/{pl2}/{type}` **`type`** | Live `/37/38/4`: slider=PL1, PL2=PL1+1, **4 = IntelPowerPlugin / CCHWApiExt** (SetPL1MSR+MMIO). Default type is 3 (raw `msr-cmd` 0x610). Not a watt. |
 | `/msr/setCpuPl4/{pl4}/{type}` | Peak clamp. Changes how hard GT can burst before `reason_pl4`, not a CPU/GPU ratio. |
 | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost (OEM “Turbo On”). Boost on → IA takes more of the package; Boost off → leftover goes to GT. Community X1 notes: GPU-bound games want Turbo **off**. |
 | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA max MHz (0 = off). Same idea: clip CPU so GPU can keep the watts. |

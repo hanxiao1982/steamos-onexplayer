@@ -52,7 +52,11 @@ BUS_NAME = "com.steampowered.OxpRapl.Tdp"
 OBJ_PATH = "/com/steampowered/OxpRapl"
 IFACE = "com.steampowered.SteamOSManager1.TdpLimit1"
 PROPS_IFACE = "org.freedesktop.DBus.Properties"
-PL2_HEADROOM_W = 5
+# X2 Mini / G3E product override in background.js:
+#   pl2MappingFunc = e == maxTdp ? maxBoostTdp : e+1
+# Live capture: /msr/setCpuPl/37/38/4. Generic Intel default before that
+# override is +5; do not use +5 on these SKUs.
+PL2_HEADROOM_W = 1
 # OneXConsole /msr/setCpuPl/{pl1}/{pl2}/{type} has no tau / time_window arg.
 # Live X2 Mini BIOS leaves long_term at ~28 s (PKG_POWER_LIMIT encoding).
 # Do not rewrite that window; a 2 s tau was our measurement shortcut, not a
@@ -302,6 +306,12 @@ def maybe_sync_pl1_window(zone: Path, pl1: dict) -> None:
     write_window_us(zone, pl1["index"], want)
 
 
+def pl2_for_pl1(pl1: int, tdp_max: int, headroom: int = PL2_HEADROOM_W) -> int:
+    """OneXConsole X2 Mini / G3E: PL2 = PL1+1 (max 45 → 46)."""
+    del tdp_max  # reserved; JS uses maxBoost only when it is not maxTdp+1
+    return int(pl1) + max(0, int(headroom))
+
+
 def apply_watts(
     zone: Path,
     watts: int,
@@ -337,7 +347,7 @@ def apply_watts(
         else:
             raise
     if pl2 is not None:
-        pl2_w = watts + max(0, pl2_headroom)
+        pl2_w = pl2_for_pl1(watts, max_w, pl2_headroom)
         pl2_max_w = uw_to_w(pl2.get("max_uw"))
         # short_term max=0 on this SKU means unspecified, not a 0 W ceiling.
         if pl2_max_w and pl2_max_w > 0:
@@ -572,7 +582,7 @@ def run_self_test() -> int:
     wrote = apply_watts(z, 25, 45)
     assert wrote == 25
     assert _read_text(z / "constraint_0_power_limit_uw") == "25000000"
-    assert _read_text(z / "constraint_1_power_limit_uw") == "30000000"
+    assert _read_text(z / "constraint_1_power_limit_uw") == "26000000"
     # OneXConsole does not write tau; leave the BIOS ~28 s window.
     assert _read_text(z / "constraint_0_time_window_us") == "27983872"
     # Previous daemon leftover 2 s → restore BIOS default.
@@ -597,8 +607,10 @@ def run_self_test() -> int:
     wrote = apply_watts(z, 40, 45, pl4_w=160)
     assert wrote == 40, wrote
     assert _read_text(z / "constraint_0_power_limit_uw") == "40000000"
-    assert _read_text(z / "constraint_1_power_limit_uw") == "45000000"
+    assert _read_text(z / "constraint_1_power_limit_uw") == "41000000"
     assert _read_text(z / "constraint_2_power_limit_uw") == "160000000"
+    assert pl2_for_pl1(37, 45) == 38
+    assert pl2_for_pl1(45, 45) == 46
     assert desired_pl1_window_us(27_983_872) is None
     assert desired_pl1_window_us(2_000_000) == BIOS_PL1_WINDOW_US
     os.environ["OXP_TDP_PL1_WINDOW_US"] = "1000000"

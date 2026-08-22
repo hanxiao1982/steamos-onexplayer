@@ -170,6 +170,39 @@ X2 Mini PRO / APEX keep WinRing0 (`setECAccessType/1`) and the AMD defaults `126
 
 ## TDP watts (not EC)
 
+Live X2 Mini capture (slider **37 W**):
+
+```
+POST /msr/setCpuPl/37/38/4
+```
+
+That is exactly `background.js` `He.setCpuPl(pl1, pl2)` with
+`intelTdpSetType=4`. First field is the slider (PL1). Second is
+`pl2MappingFunc(PL1)`: on `ONEXPLAYER X2Mini`, **PL2 = PL1+1**, except at
+`maxTdp` 45 where PL2 is `maxBoostTdp` **46** (still +1). Generic Intel
+default *before* the product override is `PL1+5`; X2 Mini replaces it.
+Third field is the write backend, not a watt.
+
+Slider IPC is `tdpChanged` → `et.setTdp(W)` → queue `Ye=PL1`, `Je=PL2`.
+A ~1.5 s loop runs `makeSetEffect()`:
+
+1. If `adjustAlwaysSetPl4` (Arc G3): `changePl4Func(0xE3)` →
+   `He.setCpuPl4(160|120|65, 4)` **first**.
+2. Then `He.setCpuPl(PL1, PL2)` → `/msr/setCpuPl/{pl1}/{pl2}/4`.
+
+`type=4` is set when DMI CPU string contains `"arc"` and `"g3"` (X2 Mini).
+Global default is **3**. OEM `app_config.json` may force 1–4. At startup,
+type 4 copies bundled `CCHWApiExt.sys` / `cchwapiext.cat` into
+`C:\Program Files\Intel Corporation\Intel(R)CCHWAPI\`
+(`IntelPowerPlugin init`). CompatLayerCT then talks to
+`IntelPowerPlugin` / `PowerPlugin.dll` (`SetPL1MSR`, `SetPL2MSR`,
+`SetPL1MMIO`, `SetPL2MMIO`, `-PL1`/`-PL2`/`-PL4`). Types 1–3 are the
+raw `msr-cmd.exe` `0x610` path. There is no JS comment “4 = DTT”; the
+plugin + MMIO+MSR exports are the evidence.
+
+`/tdp/init` is still UI bounds only. 65 W adapter (`0xE3` key 8) also
+clamps the slider to 25/26 — a 37 W POST means that clamp is not active.
+
 Changing TDP in the UI does **not** write watts into an EC register. After optional `/func/getOXPSetTdpAble`, Electron POSTs:
 
 | CPU | Path | Values |
