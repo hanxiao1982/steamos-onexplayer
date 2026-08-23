@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Dump Intel RAPL + TdpLimit1 state. Optional --set / --measure for the load test.
 # --set applies the same policy as oxp-tdp-rapl (MSR+MMIO PL1/PL2, adapter-class
-# PL4 from 0xE3, GT range; firmware PL1 tau). Do not tee only intel-rapl:0 —
+# PL4 from 0xE3; firmware PL1 tau). Does not write GT min/max. Do not tee only
+# intel-rapl:0 —
 # PCODE/GPU follow MMIO.
 set -euo pipefail
 
@@ -14,7 +15,7 @@ usage() {
   cat <<'EOF'
 Usage:
   diag-tdp.sh                 Print RAPL zones, DMI, TdpLimit1, governors
-  diag-tdp.sh --set W         Full TDP policy (PL1/PL2/PL4 + GT), then dump
+  diag-tdp.sh --set W         Full TDP policy (PL1/PL2/PL4), then dump
   diag-tdp.sh --measure SEC   Sample package energy_uj for SEC seconds
 
 TDP is a cap, not a target. 30 W at PL1=45 W is fine. OneXConsole does not
@@ -148,7 +149,7 @@ if [[ -n "$SET_W" ]]; then
     echo "--set needs root" >&2
     exit 1
   fi
-  echo "=== apply TDP policy ${SET_W} W (MSR+MMIO+GT) ==="
+  echo "=== apply TDP policy ${SET_W} W (MSR+MMIO) ==="
   if [[ -x /usr/local/sbin/oxp-tdp-rapl ]]; then
     /usr/local/sbin/oxp-tdp-rapl --set "$SET_W"
   else

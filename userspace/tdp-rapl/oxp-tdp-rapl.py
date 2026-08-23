@@ -54,7 +54,6 @@ DEFAULT_PL4_W = 160
 PL4_FALLBACKS = (160, 120, 90, 70)
 EC_POWER_SUPPLY = 0xE3
 EC_SYS_IO = Path("/sys/kernel/debug/ec/ec0/io")
-DRM_CLASS = Path("/sys/class/drm")
 
 BUS_NAME = "com.steampowered.OxpRapl.Tdp"
 OBJ_PATH = "/com/steampowered/OxpRapl"
@@ -501,71 +500,13 @@ def apply_package_watts(watts: int, max_w: int, pl4_w: int | None = None) -> int
 
 
 def apply_tdp_policy(watts: int, tdp_min: int, tdp_max: int) -> int:
+    del tdp_min  # OneXConsole does not write GT clocks; leave min/max to GuC
     e3 = read_e3()
     watts = clamp_tdp_for_e3(watts, e3)
     pl4 = pl4_from_e3(e3)
     wrote = apply_package_watts(watts, tdp_max, pl4_w=pl4)
-    apply_gt_range(wrote, tdp_min, tdp_max)
     print(f"TDP policy PL1={wrote} W PL4={pl4} W e3={e3}", flush=True)
     return wrote
-
-
-def lerp_int(x: int, x0: int, x1: int, y0: int, y1: int) -> int:
-    if x1 <= x0:
-        return y1
-    x = clamp_w(x, x0, x1)
-    return y0 + (y1 - y0) * (x - x0) // (x1 - x0)
-
-
-def _read_mhz(path: Path) -> int | None:
-    try:
-        return int(_read_text(path).split()[0])
-    except (OSError, ValueError, IndexError):
-        return None
-
-
-def gt0_freq_dirs(root: Path = DRM_CLASS) -> list[Path]:
-    if not root.is_dir():
-        return []
-    found: list[Path] = []
-    for card in sorted(root.iterdir()):
-        if not card.name.startswith("card") or not card.name[4:].isdigit():
-            continue
-        for pat in ("device/tile*/gt0/freq0", "device/gt0/freq0"):
-            found.extend(p for p in card.glob(pat) if p.is_dir())
-    return found
-
-
-def apply_gt_range(
-    tdp: int,
-    tdp_min: int,
-    tdp_max: int,
-    dirs: list[Path] | None = None,
-) -> list[tuple[Path, int, int]]:
-    """Keep GT0 as a range: min=RPe, max interpolates RPe→RP0 with TDP.
-
-    Xe treats max<=min as a *fixed* frequency. Never pin min=max=RP0.
-    """
-    applied: list[tuple[Path, int, int]] = []
-    for d in dirs if dirs is not None else gt0_freq_dirs():
-        rpe = _read_mhz(d / "rpe_freq") or 0
-        rp0 = _read_mhz(d / "rp0_freq") or 0
-        if rpe <= 0 or rp0 < rpe:
-            continue
-        min_mhz = rpe
-        max_mhz = lerp_int(tdp, tdp_min, tdp_max, rpe, rp0)
-        if max_mhz <= min_mhz:
-            max_mhz = min(rp0, min_mhz + 50)
-        try:
-            # Lower min first so a shrinking max cannot lock at the old min.
-            (d / "min_freq").write_text(f"{min_mhz}\n", encoding="utf-8")
-            (d / "max_freq").write_text(f"{max_mhz}\n", encoding="utf-8")
-        except OSError as e:
-            print(f"GT freq {d}: {e}", file=sys.stderr)
-            continue
-        applied.append((d, min_mhz, max_mhz))
-        print(f"GT {d}: min={min_mhz} max={max_mhz} (rpe={rpe} rp0={rp0})", flush=True)
-    return applied
 
 
 def current_pl1_watts(zone: Path) -> int | None:
@@ -724,10 +665,6 @@ def run_self_test() -> int:
         del os.environ["OXP_TDP_PL1_WINDOW_US"]
     for k in ("OXP_TDP_PL4", "OXP_TDP_E3"):
         os.environ.pop(k, None)
-    assert lerp_int(8, 8, 45, 70, 160) == 70
-    assert lerp_int(45, 8, 45, 70, 160) == 160
-    assert lerp_int(8, 8, 45, 1000, 2300) == 1000
-    assert lerp_int(45, 8, 45, 1000, 2300) == 2300
     assert change_pl4_func(3) == 160
     assert change_pl4_func(9) == 120
     assert change_pl4_func(8) == 65
@@ -776,18 +713,6 @@ def run_self_test() -> int:
         assert stale["n"] == 2
     finally:
         g["_read_text"] = real_read
-    g = root / "card1" / "device" / "tile0" / "gt0" / "freq0"
-    g.mkdir(parents=True)
-    (g / "rpe_freq").write_text("1000\n")
-    (g / "rp0_freq").write_text("2300\n")
-    (g / "min_freq").write_text("2300\n")
-    (g / "max_freq").write_text("2300\n")
-    got = apply_gt_range(45, 8, 45, dirs=[g])
-    assert got == [(g, 1000, 2300)], got
-    assert _read_text(g / "min_freq") == "1000"
-    assert _read_text(g / "max_freq") == "2300"
-    got = apply_gt_range(8, 8, 45, dirs=[g])
-    assert got[0][1] == 1000 and got[0][2] == 1050, got
     for name in ("TdpLimit", "TdpLimitMin", "TdpLimitMax", PROPS_IFACE, IFACE):
         assert name in INTROSPECT_XML, name
     print("self-test ok")

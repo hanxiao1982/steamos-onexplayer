@@ -47,11 +47,10 @@ TDP is a **cap**, not a target: ~30 W at PL1=45 W is success. OneXConsole
 does **not** write RAPL `long_term` tau (see below), so the BIOS ~28 s
 window stays. A 10 s `energy_uj` sample right after `--set 25` can still
 include the previous 45 W period (~27 W). That is averaging, not a failed
-write. `diag-tdp.sh --set` runs `oxp-tdp-rapl --set` (MSR **and** MMIO PL1,
-GT `max_freq`; firmware tau) and settles a few seconds for PCODE/GT, not
-for the 28 s window to roll over. Check `intel-rapl-mmio:0` long_term and
-GT0 `max_freq` after each set. Game Mode is not GPU-idle; 45 W +
-`max=2300` can keep `act_freq` at RP0 while Steam composites.
+write. `diag-tdp.sh --set` runs `oxp-tdp-rapl --set` (MSR **and** MMIO PL1;
+firmware tau) and settles a few seconds for PCODE, not for the 28 s
+window to roll over. It does **not** write GT `min_freq` / `max_freq`.
+Check `intel-rapl-mmio:0` long_term after each set.
 
 ## OneXConsole and `long_term` (tau)
 
@@ -81,9 +80,9 @@ because they set a 2 s window.
 previous build left a 2 s leftover. `OXP_TDP_PL1_WINDOW_US` is an
 explicit diag override, not the default.
 
-**Not a OneXConsole clone:** shortening tau, or interpolating GT
-`max_freq`, only changes how Linux *looks*. Windows split is DTT, not RAPL
-tau. See [CPU vs GPU split](#cpu-vs-gpu-split-not-pl1) below.
+**Not a OneXConsole clone:** shortening tau only changes how Linux *looks*.
+Windows split is DTT, not RAPL tau. See
+[CPU vs GPU split](#cpu-vs-gpu-split-not-pl1) below.
 
 To judge a lower TDP, wait longer than the printed `window=` (about 28 s)
 or use `--measure 30`. A 10 s sample after dropping 45 → 25 W can still
@@ -155,7 +154,7 @@ under the processor thermal device and GuC, not under `oxp-wmi`:
 | `processor_thermal_soc_slider` (`slider_balance` / `slider_offset`) | SoC-wide energy-perf hint (0=perf … 6=efficiency). Closest public Linux stand-in for DTT “dynamic performance”. |
 | `/sys/class/platform-profile/*/profile` | Often wired to the same slider. |
 | `intel_pstate` `no_turbo` + `energy_performance_preference` | Linux side of `/powerplan/setCpuBoostMode` + EPP. |
-| Xe `gt*/freq0/power_profile` and `min_freq`/`max_freq` | GuC clock request. Our GT lerp is a **Linux-only** substitute for missing DTT, not an OneXConsole clone. |
+| Xe `gt*/freq0/power_profile` and `min_freq`/`max_freq` | GuC clock request. The TDP remote does not write these. |
 
 `sudo kmod/scripts/diag-gpu.sh` dumps these. Compare a Windows capture of
 the DTT / powerplan POSTs against that dump before writing any of them.
@@ -237,7 +236,7 @@ an interpolated PL4.
 | Key 8 clamp | slider 25/26 | writes clamp to 25 W. Steam `TdpLimitMax` stays 45 |
 | Key 9 | PL4 120, slider still 3–45 | same |
 | tau | not written | not written (restore ~28 s if a previous daemon left 2 s) |
-| GT `max_freq` | none (DTT / type 4) | still a Linux-only RPe→RP0 lerp |
+| GT `min_freq` / `max_freq` | none (DTT / type 4) | not written; GuC / PCODE keep the range |
 
 `diag-tdp.sh` prints the `power_supply_mode` line next to RAPL so PL4
 class is visible. If `oxp_wmi` is not loaded, `e3=None` and PL4 falls
@@ -256,8 +255,8 @@ final dump was already 120. The writer now retries the same wattage
 
 `=== GT0 freq ===` empty on an older `diag-tdp.sh` is a bash glob bug
 (`case *` matched slashes and skipped `card1/device/tile0`). Current
-`dump_gt` lists that path; the apply line
-`GT …/gt0/freq0: min=1000 max=1247` is the Linux-only RPe→RP0 lerp.
+`dump_gt` lists that path. A leftover `max_freq` below `rp0` is from the
+old Linux lerp; `diag-gpu.sh --raise-max` or a reboot clears it.
 
 ## What this does not do
 
@@ -300,8 +299,7 @@ unit because `energy_uj` is root-only.
 Live X2 Mini (same game, PL1 already 45 W): BIOS PL4 55 W → `act_freq=1400`,
 `reason_pl4=1`, package ~14.8 W. Writing `peak_power=160 W` cleared the clip
 (`act_freq=2300`, ~32.6 W). OneXConsole keeps that 160 W (or 120 W on
-65 W+battery) at every slider position. GT0 `max_freq` is still a Linux-only
-RPe→RP0 lerp; `min_freq` is always RPe (Xe `max<=min` would pin a clock).
-At 45 W under load, 2.3 GHz is boost; desktop/idle `act_freq` should fall
-toward ~1.0 GHz. Reboot restores BIOS 55 W PL4 unless `oxp-tdp-rapl` is
-running.
+65 W+battery) at every slider position. The remote does not write GT
+`min_freq` / `max_freq`. At 45 W under load, 2.3 GHz is boost; desktop/idle
+`act_freq` should fall toward ~1.0 GHz. Reboot restores BIOS 55 W PL4 unless
+`oxp-tdp-rapl` is running.
