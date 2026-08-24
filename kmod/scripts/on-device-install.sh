@@ -41,4 +41,5 @@ else
 fi
 
 "${ROOT}/kmod/scripts/install-inputplumber.sh"
+"${ROOT}/kmod/scripts/install-tdp-rapl.sh"
 echo "on-device install finished"

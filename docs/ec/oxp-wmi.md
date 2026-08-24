@@ -33,8 +33,13 @@ X2 Mini (and other Intel G3E SKUs) go through the same `kmod/` deploy path as AM
 kmod/scripts/ec-stack.sh                  # should print oxp-wmi
 kmod/scripts/apply-all.sh                 # make linux/oxp-wmi/oxp-wmi.ko
 sudo kmod/scripts/test-oxp-wmi.sh
-sudo kmod/scripts/install-oxp-wmi.sh      # /var/lib/oxp-kmod + systemd
+kmod/scripts/install-oxp-wmi.sh           # build + print insmod; no systemd unit
+sudo kmod/scripts/test-oxp-wmi.sh         # load this boot only
+# Bazzite: do not persist via systemd. init_t cannot insmod a var_lib_t
+# .ko (Permission denied) and cannot exec a modules_object_t script (203/EXEC).
+# Login `sudo insmod` / `test-oxp-wmi.sh` is unconfined and works.
 sudo kmod/scripts/install-inputplumber.sh
+sudo kmod/scripts/install-tdp-rapl.sh     # TdpLimit1 → RAPL; no-op on AMD
 ```
 
 CachyOS / Bazzite one-shot (`install-cachyos.sh` / `install-bazzite.sh` / `on-device-install.sh`) detect the stack and take this path automatically.

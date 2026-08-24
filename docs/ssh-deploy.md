@@ -192,8 +192,8 @@ Commit those `.env` files so the next `push` includes them.
 ### 2.5 Confirm it worked
 
 ```bash
-ssh -t "$H" 'systemctl --no-pager --full status oxpec-local.service oxp-wmi-local.service'
-ssh "$H" 'ls -l /var/lib/oxp-kmod/; ls /sys/class/hwmon/*/name | while read f; do echo "$f=$(cat "$f")"; done'
+ssh -t "$H" 'systemctl --no-pager --full status oxpec-local.service'
+ssh "$H" 'lsmod | grep -E "oxpec|oxp_wmi"; ls /sys/class/hwmon/*/name | while read f; do echo "$f=$(cat "$f")"; done'
 ssh "$H" 'journalctl -u inputplumber -b --no-pager | tail -n 30'
 ```
 

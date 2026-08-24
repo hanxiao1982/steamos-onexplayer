@@ -1,0 +1,6 @@
+# /etc/steamos-manager/remotes.d/oxp-rapl.toml
+# Fills TdpLimit1 when the local device catalog has no [tdp_limit].
+# Do not also put GpuPerformanceLevel1 on this bus name (steamos-manager 26.3 deadlock).
+[TdpLimit1]
+bus_name = "com.steampowered.OxpRapl.Tdp"
+object_path = "/com/steampowered/OxpRapl"

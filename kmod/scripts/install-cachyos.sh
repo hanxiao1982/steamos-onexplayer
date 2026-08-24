@@ -16,13 +16,8 @@ STACK="$("${ROOT}/kmod/scripts/ec-stack.sh" detect)"
 echo "ec-stack=${STACK}"
 
 if [[ "$STACK" == oxp-wmi ]]; then
-  "${ROOT}/kmod/scripts/build.sh" oxp-wmi
   "${ROOT}/kmod/scripts/install-oxp-wmi.sh"
-  "${ROOT}/kmod/scripts/test-oxp-wmi.sh" "${ROOT}/linux/oxp-wmi/oxp-wmi.ko"
-  echo
-  echo "Optional persist via DKMS (rebuilds after kernel updates):"
-  echo "  sudo dkms add ${ROOT}/linux/oxp-wmi"
-  echo "  sudo dkms install oxp-wmi/0.7"
+  "${ROOT}/kmod/scripts/install-tdp-rapl.sh"
   exit 0
 fi
 

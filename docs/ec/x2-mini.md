@@ -55,9 +55,10 @@ Cross-checked against `background.js` routes. None of these write the G3E EC map
 
 | UI | OneXConsole path | Notes |
 |---|---|---|
-| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | `intelTdpSetType=4`. `0xED` stays 0. |
-| CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Does not touch `0xEB`. |
-| CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Power plan. Off → `0`. |
+| TDP / PL1 / PL2 / PL4 | `/msr/setCpuPl/{pl1}/{pl2}/4`, `/msr/setCpuPl4/{pl4}/4` | PL2=PL1+1, type 4. Adapter-only 16/18: no `setCpuPl4`. Battery: every apply is `setCpuPl4` then `setCpuPl`. PL4 **160** (100 W) or **120** (65 W+battery / key 9); not a function of the slider. Boot: `/tdp/init/3/45/46`, `/powerplan/setCpuBoostMode/2`. No `intelpnp` on slider or adapter swap. `0xED` stays 0. |
+| CPU turbo switch | `/powerplan/setCpuBoostMode/{0\|2}` | Windows CPU Boost. Shifts package share toward IA. Not `0xEB`. |
+| CPU max clock | `/powerplan/setCpuMaxClock/{MHz}` | Caps IA MHz so GT can keep watts. Off → `0`. |
+| Intel dynamic performance / Adaptive TDP | `/intelpnp/setOEMVarWithPowerScheme/{oemVar}` (JS); `/power/setCpuMaxStatusPercent/{n}` (exe only) | No `/dtt/` template. See [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md). |
 | GPU clock | — | X2 Mini does **not** enable `manualGpuClk` / `gpuClk`. |
 | RGB / LED | `/rgbPartition/setColor\|setOpen\|setPreset` | `rgbPartitionMode`, `CommonHid`. No `EC_ADDR_RGB`. |
 | Rumble / gyro / key mapping | `/programhandle/…`, `/gyro/…`, `/motor/…` | HID. |
@@ -77,7 +78,7 @@ OneXConsole formula: `adapter_class | (battery ? 0x01 : 0)` — bits 0 battery, 
 | ≤65W, no battery | **16** (`0x10`) | **8** | only bit4; not `8` or `24` |
 | ≥140W / DC-in | not measured | 4 / 5 | X2 Mini `dcin=false`; keys 4/5 still exist as TypeC ≥140W icons |
 
-Firmware adds **bit4 (`0x10`)** = adapter-only. Normalize for oxp lookup: `16→8`, `18→2`. X2 Mini `changePl4Func` handles `1|2|3|4|5→160`, `9→120`, `8→65` — live **16/18** are missing. Full bit table: [ui-vs-ec.md](ui-vs-ec.md).
+Firmware adds **bit4 (`0x10`)** = adapter-only. Normalize for oxp lookup: `16→8`, `18→2`. X2 Mini `changePl4Func` handles `1|2|3|4|5→160`, `9→120`, `8→65` — live **16/18** are missing (no HTTP PL4). With battery, 100 W → PL4 160 and 65 W → PL4 120 (key 9); slider stays 3–45 (`/tdp/init/3/45/46`), not the key-8 25 W clamp. Full bit table: [ui-vs-ec.md](ui-vs-ec.md).
 
 ## Init (OneXConsole)
 
@@ -97,8 +98,8 @@ battery/initEc(0xA3, 0xA4, 0xA5, 0, 1, 3)
 
 ## SteamOS / Linux
 
-WMI driver (Intel / OxpWMI): [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Deploy on Bazzite/CachyOS with the same `kmod/scripts` path as AMD boards: `ec-stack.sh` prints `oxp-wmi`, then `apply-all.sh` / `install-oxp-wmi.sh` (or `ssh-handheld.sh user@host all`). Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`, optional decode of `0xE3`.
+WMI driver (Intel / OxpWMI): [oxp-wmi.md](oxp-wmi.md) (`linux/oxp-wmi/`). Deploy on Bazzite/CachyOS with the same `kmod/scripts` path as AMD boards: `ec-stack.sh` prints `oxp-wmi`, then `apply-all.sh` / `install-oxp-wmi.sh` (build + print `insmod`; no boot service) and `sudo test-oxp-wmi.sh` for this boot. Use fan `0x4A`/`0x4B`/`0x58`/`0x59` (PWM 0–184), charge `0xA3`/`0xA4` (bypass 0/1/3), CPU temp `0x70`. `oxp-tdp-rapl` reads `0xE3` (`power_supply_mode`) for adapter-class PL4 (160/120/65).
 
 Do not implement: `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB`, `0xED`.
 
-TDP = Intel MSR. RGB / rumble / gyro = HID. CPU turbo / clock = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).
+TDP = Intel RAPL (`TdpLimit1` remote), not EC. See [tdp.md](tdp.md). RGB / rumble / gyro = HID. CPU turbo / clock = host power policy, not EC. `oxpec` remains ACPI-EC only (AMD / fallback).

@@ -85,8 +85,8 @@ if [[ "$STACK" == oxp-wmi ]]; then
   fi
   "${ROOT}/kmod/scripts/build.sh" oxp-wmi
   echo
-  echo "Next: sudo kmod/scripts/test-oxp-wmi.sh linux/oxp-wmi/oxp-wmi.ko"
-  echo "      sudo kmod/scripts/install-oxp-wmi.sh"
+  echo "Next (manual load, no boot service):"
+  echo "      sudo kmod/scripts/test-oxp-wmi.sh linux/oxp-wmi/oxp-wmi.ko"
   echo "      sudo kmod/scripts/install-inputplumber.sh"
   exit 0
 fi

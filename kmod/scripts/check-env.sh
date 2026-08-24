@@ -356,8 +356,8 @@ if [[ "$EC_STACK" == oxp-wmi ]]; then
   else
     warn "OxpWMI GUID" "no 43B5A593-AD62-4257-8546-91B0797BEC1B (not X2 Mini firmware, or WMI is down)"
   fi
-  if [[ -e /var/lib/oxp-kmod/oxp-wmi.ko ]]; then
-    ok "installed module" "/var/lib/oxp-kmod/oxp-wmi.ko"
+  if [[ -n "$ROOT" && -e "${ROOT}/linux/oxp-wmi/oxp-wmi.ko" ]]; then
+    ok "built module" "${ROOT}/linux/oxp-wmi/oxp-wmi.ko"
   fi
 else
   oxpec_cfg="$(kconfig_val CONFIG_OXPEC)"

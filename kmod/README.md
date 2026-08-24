@@ -11,8 +11,9 @@ kmod/scripts/collect-dmi.sh --add
 
 # Intel G3E / X2 Mini
 kmod/scripts/apply-all.sh                # build oxp-wmi.ko
-sudo kmod/scripts/test-oxp-wmi.sh
-sudo kmod/scripts/install-oxp-wmi.sh
+kmod/scripts/install-oxp-wmi.sh           # rebuild + print insmod; no boot service
+sudo kmod/scripts/test-oxp-wmi.sh         # load this boot only
+sudo kmod/scripts/install-tdp-rapl.sh     # Steam TdpLimit1 → RAPL (Intel G3E)
 
 # AMD / oxpec
 kmod/scripts/apply-all.sh --fetch ogc
