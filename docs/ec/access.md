@@ -96,11 +96,14 @@ WMI, not port I/O.
 | 1 | EC RAM byte |
 | 2–7 | `0x00` on single-byte reads |
 
-Confirmed R/W (X2 Mini CIM): Arg2 is ACPI Integer. `GroupOffsetValue = 0x04 | (reg << 8) | (value << 16)` (bytes `04, reg, value, 00`). Method 2 (`WriteECReg`) applies; method 3 is not required. After `0x4A=1`, rewrite `0x4B` to latch PWM. Details: [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini).
+Confirmed R/W (X2 Mini CIM): the method input is a MOF `UInt32`, serialized by ACPI-WMI as little-endian Buffer bytes. `GroupOffsetValue = 0x04 | (reg << 8) | (value << 16)` becomes `04, reg, value, 00`. Method 2 (`WriteECReg`) applies; method 3 is not required. After `0x4A=1`, rewrite `0x4B` to latch PWM. Details: [linux-wmi.md](linux-wmi.md#windows-probe-x2-mini).
 
 Generic WMI helper errors mention `outParams["Data"]`, `dataOut["Bytes"]`, `iDataBlockIndex`, `fullPackage` — a shared ACPI-WMI invoker, not a second EC protocol.
 
-Firmware owns serialization on this path. That is why Intel G3E models force type 2: OneXConsole never opens WinRing0 on those SKUs.
+The V5.04 DSDT declares `WMAC` as `NotSerialized`; its one-byte helper methods
+are `Serialized`. The Linux client therefore keeps a mutex around each complete
+WMI call instead of assuming the top-level method provides serialization. Intel
+G3E models force type 2 because OneXConsole never opens WinRing0 on those SKUs.
 
 ## Linux oxpec
 
@@ -116,7 +119,7 @@ acpi_release_global_lock();
 
 There is **no** `SuRwECRegInterface` client in `oxpec`. Intel G3E uses the out-of-tree [`oxp-wmi`](oxp-wmi.md) driver (`linux/oxp-wmi/`).
 
-The kernel *does* already have a G3E handheld that speaks EC-over-WMI: MSI Claw 8 EX AI+ via `msi-wmi-platform`. Same idea (mutex + evaluate on `PNP0C14`), different class/GUID/method ABI and Arg2 type than `SuRwECRegInterface` (OxpWMI needs Integer Arg2 on `WMAC`). File map and comparison: [linux-wmi.md](linux-wmi.md).
+The kernel *does* already have a G3E handheld that speaks EC-over-WMI: MSI Claw 8 EX AI+ via `msi-wmi-platform`. Same idea (mutex + WMI evaluate on `PNP0C14`), but a different class, GUID, method table, and buffer layout from `SuRwECRegInterface`. File map and comparison: [linux-wmi.md](linux-wmi.md).
 
 Userspace on Linux (not used by `oxpec`):
 
@@ -130,8 +133,8 @@ Userspace on Linux (not used by `oxpec`):
 |---|---|---|---|
 | Transport | Ring-0 port I/O | WMI `SuRwECRegInterface` | ACPI EC (`ec_read`/`ec_write`) |
 | Ports | 0x66 / 0x62 | none | 0x66 / 0x62 (inside ACPI EC) |
-| Address | 8-bit | UInt32 `0x04 \| (reg << 8)` (JS `0x400+reg` is rejected) | 8-bit |
-| Lock | process `ECLocker` | firmware WMI | ACPI global lock, 500 ms |
+| Address | 8-bit | MOF UInt32 serialized as LE buffer: `0x04 \| (reg << 8)` (JS `0x400+reg` is rejected) | 8-bit |
+| Lock | process `ECLocker` | client mutex; serialized AML helpers | ACPI global lock, 500 ms |
 | Read cache | `readCache` | not indicated | none |
 | Privilege | signed `.sys` | normal WMI | kernel module |
 | Platform in this repo | AMD | Intel G3E | whatever DMI table matches |
@@ -179,5 +182,5 @@ TDP watts stay out of the EC on both sides (MSR / `ryzenadj` vs `oxpec` which do
 ## Implications for SteamOS
 
 1. **AMD (X2 Mini PRO)** — `oxpec` + ACPI EC is the right shape. Add DMI if missing; switch charge to `0xE5`/`0xE6` (skip `0xE7` until live-checked).
-2. **Intel G3E** — use [`oxp-wmi`](oxp-wmi.md) (`linux/oxp-wmi/`), bound to GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`. Call `WMAC` with Integer Arg2 (CIM); Buffer/`wmidev` only if WMAC is missing. Methods `ReadECReg=1` / `WriteECReg=2` with `GroupOffset = 0x04 | (reg << 8)` and writes `| (val << 16)` (not JS `0x400+reg`). Fan `0x58`/`0x4A`/`0x4B` (strobe `0x4B` after `0x4A=1`), charge `0xA3`/`0xA4`, CPU temp `0x70`. Skip `0xEB` / `0x2D` / `0xED` / board temps. Do not reuse `ABBC0F6E` / `MSI_ACPI`. If ACPI EC is also present, `oxpec`+`ec_read` is a fallback, not the official path.
+2. **Intel G3E** — use [`oxp-wmi`](oxp-wmi.md) (`linux/oxp-wmi/`), bound to GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`. Invoke methods through the WMI core with a four-byte little-endian Buffer carrying the MOF `UInt32`: `ReadECReg=1` uses `0x04 | (reg << 8)`, and `WriteECReg=2` adds `| (val << 16)` (not JS `0x400+reg`). Fan `0x58`/`0x4A`/`0x4B` (strobe `0x4B` after `0x4A=1`), charge `0xA3`/`0xA4`, CPU temp `0x70`. Skip `0xEB` / `0x2D` / `0xED` / board temps. Do not reuse `ABBC0F6E` / `MSI_ACPI`. If ACPI EC is also present, `oxpec`+`ec_read` is a fallback, not the official path.
 3. Do not use WinRing0-style port I/O from Linux userspace; use ACPI EC or WMI.

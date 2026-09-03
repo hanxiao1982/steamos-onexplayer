@@ -2,13 +2,13 @@
 
 Out-of-tree module: [`linux/oxp-wmi/`](../../linux/oxp-wmi/).
 
-Same *shape* as in-tree `msi-wmi-platform`: `struct wmi_driver`, mutex, hwmon, debugfs. Different GUID, methods, and Arg2 type. Default path is ACPI method **`WMAC` with Integer Arg2** (Windows CIM). `wmidev_evaluate_method()` Buffer Arg2 is fallback only if WMAC is missing. Do **not** bind the MSI GUID.
+Same *shape* as in-tree `msi-wmi-platform`: `struct wmi_driver`, mutex, hwmon, debugfs. Different GUID, methods, and payload layout. Windows CIM exposes the input as a MOF `UInt32`; the driver serializes it as a four-byte little-endian WMI method buffer, which the firmware `WMAC` consumes byte by byte. Do **not** bind the MSI GUID.
 
 OxpWMI is the Intel path (`ecAccessType=2`). AMD / WinRing0 boards stay on `oxpec`.
 
 Register map (current OneXConsole Intel table): [x2-mini.md](x2-mini.md). Protocol: [linux-wmi.md](linux-wmi.md), [access.md](access.md). Per-SKU offsets can be added later; the WMI transport stays the same.
 
-**X2 Mini Bazzite live:** WMAC Integer Arg2. `pwm1=153` (~60%) held ~4400 RPM; auto restore dropped RPM. Charge sysfs is present, not soak-tested.
+**X2 Mini Bazzite live:** `pwm1=153` (~60%) held ~4400 RPM; auto restore dropped RPM. That live result established the numeric packing and methods. The V5.04 DSDT/BMOF analysis below establishes the WMI/AML object types. Charge sysfs is present, not soak-tested.
 
 ## What it controls
 
@@ -59,8 +59,8 @@ DMI: `Manufacturer` or `Board Vendor` contains `ONE-NETBOOK`. Known AMD products
 
 ```
 dmesg | grep oxp-wmi
-# calling WMAC with Integer Arg2
-# OxpWMI ok, WMAC Integer Arg2, CPU temp NN C
+# using WMI method buffer with little-endian UInt32 payload
+# OxpWMI ok, WMI UInt32 buffer, CPU temp NN C
 
 ls /sys/class/hwmon/hwmon*/name
 cat /sys/class/hwmon/oxp_wmi/fan1_input
@@ -80,9 +80,19 @@ cat $H/pwm1                 # stays ~153 (unlike the old Buffer path)
 echo 2 > $H/pwm1_enable     # auto; RPM falls; 0x4B readback may stay stale
 ```
 
-## Packing (Windows CIM, confirmed)
+## Packing and Arg2 type
 
-Arg2 is ACPI **Integer** (`UInt32`), not a Buffer / 32-byte Package. Linux calls `WMAC` with that Integer. Method **2 (`WriteECReg`) is the apply**; method 3 (`WriteReadECReg`) is not required.
+Keep the layers distinct:
+
+| Layer | Type | Example for `0x4A=1` |
+|---|---|---|
+| OneXConsole / Windows CIM | MOF `uint32` | `0x00014A04` |
+| ACPI-WMI method input | four-byte Buffer | `04 4A 01 00` |
+| `WMAC` fields | three byte fields | group `04`, offset `4A`, data `01` |
+
+The driver passes that four-byte Buffer through `wmidev_evaluate_method()`. A direct `ACPI_TYPE_INTEGER` call produces the same first bytes only because ACPICA implicitly converts the Integer to a little-endian Buffer for AML `CreateByteField`; relying on that conversion is unnecessary.
+
+Method **2 (`WriteECReg`) is the apply**; method 3 (`WriteReadECReg`) is not required.
 
 ```
 read:  GroupOffset      = 0x04 | (reg << 8)               # bytes 04, reg, 00, 00
@@ -99,10 +109,48 @@ In auto, `0x4B` is not the live motor compare (stale). After `0x4A=1`, rewrite `
 # write 1-byte register number, then read 8-byte last output
 printf '\x70' | sudo tee /sys/kernel/debug/oxp-wmi-*/read_ec >/dev/null
 sudo hexdump -C /sys/kernel/debug/oxp-wmi-*/read_ec | head
-sudo cat /sys/kernel/debug/oxp-wmi-*/last_info   # wm=WMAC arg2=integer …
+sudo cat /sys/kernel/debug/oxp-wmi-*/last_info   # wmi method=1 input=u32-le:…
 
 # write reg 0x4A = 1 (manual); hwmon pwm1_enable=1 also strobes 0x4B
 printf '\x4a\x01' | sudo tee /sys/kernel/debug/oxp-wmi-*/write_ec >/dev/null
 ```
 
 Status byte `0x00` = ok, `0xFF` = fail (inverted vs `msi-wmi-platform`).
+
+## V5.04 firmware evidence
+
+`X2Mini-GE3-NewBIOS-V5.04-WinFlash(FixTheScreenDisplay).zip` contains a
+32 MiB SPI image. Its 222,851-byte DSDT defines:
+
+```text
+PNP0C14 _UID "RWECREGWMI"
+GUID      43B5A593-AD62-4257-8546-91B0797BEC1B
+object_id "AC" -> WMAC
+instances 1
+flags     0x02 (WMI method)
+```
+
+The embedded BMOF declares `ReadECReg`, `WriteECReg`, and `WriteReadECReg`
+with MOF `uint32` inputs. `WMAC` is `NotSerialized` (the byte-access helpers it
+calls are `Serialized`), so the Linux driver serializes complete WMI calls with
+a mutex. `WMAC` then does:
+
+```asl
+CreateByteField (Arg2, 0, GRPN)
+CreateByteField (Arg2, 1, OFFR)
+CreateByteField (Arg2, 2, WTDT)
+```
+
+It accesses one byte at `0xFE0B0000 + GRPN * 0x100 + OFFR` through a
+`SystemMemory` OperationRegion. This is a firmware-defined memory-mapped EC
+window, not an `EmbeddedControl` OperationRegion.
+
+ACPICA `acpiexec` runs against the extracted DSDT returned identical results
+for Integer `0x5804` and Buffer `{ 0x04, 0x58, 0x00, 0x00 }`. That proves the
+Integer path is compatibility through implicit conversion, while the Buffer
+path is the native ACPI-WMI ABI. No extracted SSDT contains a second `WMAC` or
+overrides this device.
+
+Although the BMOF describes method 3 as returning multiple registers, the
+V5.04 AML writes one byte and reads the same offset back; the remaining output
+bytes are zero. The driver therefore continues to use method 2 for writes.

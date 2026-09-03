@@ -5,14 +5,16 @@
  * Windows OneXConsole / CIM (X2 Mini live):
  *
  *   Invoke-CimMethod SuRwECRegInterface ReadECReg/WriteECReg
- *   Arg2 is ACPI Integer (UInt32), not a Buffer / Package_32
+ *   The MOF input is UInt32, marshalled as a 4-byte little-endian WMI buffer
  *   Read   WmiMethodId 1  GroupOffset      = 0x04 | (reg << 8)
  *   Write  WmiMethodId 2  GroupOffsetValue = 0x04 | (reg << 8) | (val << 16)
  *                         bytes 04, reg, val, 00  (confirmed)
  *   Output STRING "0x00,0xNN,..." ; byte0 0x00 ok (inverted vs MSI)
  *
- * Call WMAC with Integer Arg2. wmidev_evaluate_method() types Arg2 from
- * _WDG (Buffer/String) and does not drive the fan on this firmware.
+ * The firmware _WDG maps the GUID to WMAC and marks it as a WMI method.
+ * WMAC creates byte fields at Arg2 offsets 0..2, so use the WMI core to pass
+ * the UInt32 payload as a Buffer. A direct ACPI Integer happens to work only
+ * because ACPICA implicitly converts it to a little-endian Buffer.
  * X2 Mini Bazzite live: manual ~60% held ~4400 RPM; auto restored.
  * Do not bind the MSI GUID. Not for AMD / WinRing0 boards.
  *
@@ -67,29 +69,14 @@ enum oxp_wmi_method {
 
 #define OXP_WMI_OUT_LEN		8
 
-/* 43B5A593-AD62-4257-8546-91B0797BEC1B in Windows/_WDG mixed-endian order. */
-static const u8 oxp_wmi_guid_bin[16] = {
-	0x93, 0xa5, 0xb5, 0x43, 0x62, 0xad, 0x57, 0x42,
-	0x85, 0x46, 0x91, 0xb0, 0x79, 0x7b, 0xec, 0x1b
-};
-
-struct oxp_wdg_block {
-	u8 guid[16];
-	u8 object_id[2];
-	u8 instance_count;
-	u8 flags;
-} __packed;
-
 static bool force;
 module_param_unsafe(force, bool, 0444);
 MODULE_PARM_DESC(force, "Load without DMI whitelist (debug)");
 
 struct oxp_wmi_data {
 	struct wmi_device *wdev;
-	struct mutex wmi_lock;	/* firmware WMxx is not thread-safe */
+	struct mutex wmi_lock;	/* WMAC is NotSerialized; serialize our calls */
 	struct dentry *debugfs;
-	acpi_handle acpi_handle;
-	char wm_method[5];
 	u8 last_out[OXP_WMI_OUT_LEN];
 	char last_desc[160];
 };
@@ -161,146 +148,42 @@ static int oxp_wmi_parse_output(union acpi_object *obj, u8 *out)
 	}
 }
 
-static acpi_handle oxp_wmi_acpi_handle(struct wmi_device *wdev)
-{
-	struct device *dev;
-	struct acpi_device *adev;
-	int hop;
-
-	for (dev = &wdev->dev, hop = 0; dev && hop < 6; dev = dev->parent, hop++) {
-		if (ACPI_HANDLE(dev))
-			return ACPI_HANDLE(dev);
-		adev = ACPI_COMPANION(dev);
-		if (adev && adev->handle)
-			return adev->handle;
-	}
-	return NULL;
-}
-
-static int oxp_wmi_bind_wm(struct oxp_wmi_data *data, acpi_handle handle,
-			   const char *method)
-{
-	char name[5];
-	acpi_handle tmp;
-
-	if (!handle || !method || strlen(method) != 4)
-		return -EINVAL;
-	memcpy(name, method, 4);
-	name[4] = '\0';
-	if (ACPI_FAILURE(acpi_get_handle(handle, name, &tmp)))
-		return -ENOENT;
-	data->acpi_handle = handle;
-	memcpy(data->wm_method, name, sizeof(data->wm_method));
-	return 0;
-}
-
 /*
- * Resolve WMxx for this GUID. Do not require the METHOD flag: X2 Mini
- * object_id=AC still exposes WMAC even when _WDG flags look wrong.
- */
-static int oxp_wmi_discover_wm(struct oxp_wmi_data *data)
-{
-	struct acpi_buffer out = { ACPI_ALLOCATE_BUFFER, NULL };
-	const struct oxp_wdg_block *blocks;
-	union acpi_object *obj;
-	acpi_handle handle;
-	char wm[5];
-	u32 i, n;
-	int ret = -ENODEV;
-
-	handle = oxp_wmi_acpi_handle(data->wdev);
-	if (!handle)
-		return -ENODEV;
-
-	if (!ACPI_FAILURE(acpi_evaluate_object(handle, "_WDG", NULL, &out))) {
-		obj = out.pointer;
-		if (obj && obj->type == ACPI_TYPE_BUFFER && obj->buffer.pointer) {
-			blocks = (const struct oxp_wdg_block *)obj->buffer.pointer;
-			n = obj->buffer.length / sizeof(*blocks);
-			for (i = 0; i < n; i++) {
-				if (memcmp(blocks[i].guid, oxp_wmi_guid_bin, 16))
-					continue;
-				wm[0] = 'W';
-				wm[1] = 'M';
-				wm[2] = blocks[i].object_id[0];
-				wm[3] = blocks[i].object_id[1];
-				wm[4] = '\0';
-				dev_info(&data->wdev->dev,
-					 "GUID object_id=%c%c flags=0x%02x\n",
-					 wm[2], wm[3], blocks[i].flags);
-				if (!oxp_wmi_bind_wm(data, handle, wm)) {
-					ret = 0;
-					break;
-				}
-			}
-		}
-		kfree(obj);
-	}
-
-	if (ret && !oxp_wmi_bind_wm(data, handle, "WMAC"))
-		ret = 0;
-	return ret;
-}
-
-/*
- * Windows CIM passes Arg2 as ACPI Integer. wmidev_evaluate_method() types
- * Arg2 from _WDG (Buffer/String) and does not drive the fan on this firmware.
+ * The MOF calls the input a UInt32. ACPI-WMI carries method parameters in a
+ * Buffer, so serialize that value explicitly as little endian and let the WMI
+ * core resolve GUID -> object_id "AC" -> WMAC from _WDG.
  * Status polarity is inverted vs MSI: 0x00 is success here.
  */
 static int oxp_wmi_query(struct oxp_wmi_data *data, u32 method, u32 in_val,
 			 u8 *out)
 {
 	struct acpi_buffer acpi_out = { ACPI_ALLOCATE_BUFFER, NULL };
+	__le32 in_le = cpu_to_le32(in_val);
+	struct acpi_buffer acpi_in = {
+		.length = sizeof(in_le),
+		.pointer = &in_le,
+	};
 	union acpi_object *obj;
 	acpi_status status;
-	bool used_int = false;
 	int ret;
 
 	mutex_lock(&data->wmi_lock);
-	if (data->acpi_handle && data->wm_method[0]) {
-		union acpi_object params[3];
-		struct acpi_object_list arglist = {
-			.count = 3,
-			.pointer = params,
-		};
-
-		params[0].type = ACPI_TYPE_INTEGER;
-		params[0].integer.value = 0;
-		params[1].type = ACPI_TYPE_INTEGER;
-		params[1].integer.value = method;
-		/* Integer value is the UInt32 as-is, not cpu_to_le32(). */
-		params[2].type = ACPI_TYPE_INTEGER;
-		params[2].integer.value = in_val;
-		used_int = true;
-		status = acpi_evaluate_object(data->acpi_handle, data->wm_method,
-					      &arglist, &acpi_out);
-	} else {
-		__le32 in_le = cpu_to_le32(in_val);
-		struct acpi_buffer acpi_in = {
-			.length = sizeof(in_le),
-			.pointer = &in_le,
-		};
-
-		status = wmidev_evaluate_method(data->wdev, 0, method, &acpi_in,
-						&acpi_out);
-	}
+	status = wmidev_evaluate_method(data->wdev, 0, method, &acpi_in,
+					&acpi_out);
 	mutex_unlock(&data->wmi_lock);
 
 	if (ACPI_FAILURE(status)) {
 		scnprintf(data->last_desc, sizeof(data->last_desc),
-			  "wm=%s arg2=%s method=%u in=0x%08x acpi=0x%x",
-			  data->wm_method[0] ? data->wm_method : "wmidev",
-			  used_int ? "integer" : "buffer", method, in_val,
-			  status);
+			  "wmi method=%u input=u32-le:0x%08x acpi=0x%x",
+			  method, in_val, status);
 		return -EIO;
 	}
 
 	obj = acpi_out.pointer;
 	if (!obj) {
 		scnprintf(data->last_desc, sizeof(data->last_desc),
-			  "wm=%s arg2=%s method=%u in=0x%08x empty",
-			  data->wm_method[0] ? data->wm_method : "wmidev",
-			  used_int ? "integer" : "buffer", method, in_val);
+			  "wmi method=%u input=u32-le:0x%08x empty",
+			  method, in_val);
 		return -ENODATA;
 	}
 
@@ -310,9 +193,8 @@ static int oxp_wmi_query(struct oxp_wmi_data *data, u32 method, u32 in_val,
 		memcpy(data->last_out, out, OXP_WMI_OUT_LEN);
 
 	scnprintf(data->last_desc, sizeof(data->last_desc),
-		  "wm=%s arg2=%s method=%u in=0x%08x parse=%d out=%02x %02x",
-		  data->wm_method[0] ? data->wm_method : "wmidev",
-		  used_int ? "integer" : "buffer", method, in_val, ret,
+		  "wmi method=%u input=u32-le:0x%08x parse=%d out=%02x %02x",
+		  method, in_val, ret,
 		  out[0], out[1]);
 
 	if (ret)
@@ -769,13 +651,8 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 	mutex_init(&data->wmi_lock);
 	dev_set_drvdata(&wdev->dev, data);
 
-	if (oxp_wmi_discover_wm(data)) {
-		dev_warn(&wdev->dev,
-			 "WMAC not found; falling back to wmidev Buffer Arg2\n");
-	} else {
-		dev_info(&wdev->dev, "calling %s with Integer Arg2\n",
-			 data->wm_method);
-	}
+	dev_info(&wdev->dev,
+		 "using WMI method buffer with little-endian UInt32 payload\n");
 
 	ret = oxp_wmi_read(data, OXP_REG_CPU_TEMP, &temp);
 	if (ret) {
@@ -787,9 +664,8 @@ static int oxp_wmi_probe(struct wmi_device *wdev, const void *context)
 		dev_warn(&wdev->dev, "Continuing because force=1\n");
 	} else {
 		dev_info(&wdev->dev,
-			 "OxpWMI ok, %s %s Arg2, CPU temp %u C\n",
-			 data->wm_method[0] ? data->wm_method : "wmidev",
-			 data->wm_method[0] ? "Integer" : "Buffer", temp);
+			 "OxpWMI ok, WMI UInt32 buffer, CPU temp %u C\n",
+			 temp);
 	}
 
 	oxp_wmi_debugfs_init(data);
