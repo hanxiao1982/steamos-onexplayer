@@ -1,28 +1,25 @@
+From 6f9da9bfea5a0f1b88d6a36703cd5a913269b5ae Mon Sep 17 00:00:00 2001
+From: Xiao Han <hanxiao@live.com>
+Date: Thu, 3 Sep 2026 18:09:46 +0000
 Subject: [PATCH 3/3] platform/x86: oxpec: Add APEX charge profile
 
 OneXConsole uses the Fly-style fan and turbo registers on ONEXPLAYER APEX
 and ONEXPLAYER X2Mini PRO, but their charge-control registers are E5/E6
 rather than A3/A4.
 
-Add an oxp_apex profile that preserves the existing fan, PWM and turbo
-behaviour while selecting the vendor charge registers.
+Add an APEX profile that preserves the existing fan, PWM and turbo
+behavior while selecting the vendor charge registers.
 
+Signed-off-by: Xiao Han <hanxiao@live.com>
 ---
- drivers/platform/x86/oxpec.c | 29 ++++++++++++++++++++++++++---
- 1 file changed, 26 insertions(+), 3 deletions(-)
+ drivers/platform/x86/oxpec.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
+index ba3e9d8..f417166 100644
 --- a/drivers/platform/x86/oxpec.c
 +++ b/drivers/platform/x86/oxpec.c
-@@ -44,6 +44,7 @@ enum oxp_board {
- 	oxp_2,
- 	oxp_2_ga18,
- 	oxp_fly,
-+	oxp_apex,
- 	oxp_mini_amd,
- 	oxp_mini_amd_a07,
- 	oxp_mini_amd_pro,
-@@ -109,6 +110,9 @@ static struct device *oxp_dev;
+@@ -98,6 +98,9 @@ static struct device *oxp_dev;
  #define OXP_X1_CHARGE_LIMIT_REG		0xA3 /* X1 charge limit (%) */
  #define OXP_X1_CHARGE_INHIBIT_REG	0xA4 /* X1 bypass charging */
  
@@ -32,40 +29,41 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  #define OXP_X1_CHARGE_INHIBIT_MASK_AWAKE	0x01
  /* X1 Mask is 0x0A, F1Pro is 0x02 but the extra bit on the X1 does nothing. */
  #define OXP_X1_CHARGE_INHIBIT_MASK_OFF		0x02
-@@ -166,6 +170,20 @@ static const struct oxp_ec_profile oxp_ec_profiles[] = {
- 		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
- 		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
- 	},
-+	[oxp_apex] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 255,
-+		.turbo_reg = OXP_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+		.charge_limit_reg = OXP_APEX_CHARGE_LIMIT_REG,
-+		.charge_inhibit_reg = OXP_APEX_CHARGE_INHIBIT_REG,
-+		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
-+		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
-+	},
- 	[oxp_mini_amd] = {
- 		.fan_reg = OXP_SENSOR_FAN_REG,
- 		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-@@ -310,7 +328,7 @@ static const struct dmi_system_id dmi_table[] = {
+@@ -152,6 +155,19 @@ static const struct oxp_ec_profile oxp_fly = {
+ 	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
+ };
+ 
++static const struct oxp_ec_profile oxp_apex = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 255,
++	.turbo_reg = OXP_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++	.charge_limit_reg = OXP_APEX_CHARGE_LIMIT_REG,
++	.charge_inhibit_reg = OXP_APEX_CHARGE_INHIBIT_REG,
++	.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++};
++
+ static const struct oxp_ec_profile oxp_mini_amd = {
+ 	.fan_reg = OXP_SENSOR_FAN_REG,
+ 	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
+@@ -327,7 +343,7 @@ static const struct dmi_system_id dmi_table[] = {
  			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
  			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX"),
  		},
--		.driver_data = (void *)oxp_fly,
-+		.driver_data = (void *)oxp_apex,
+-		.driver_data = (void *)&oxp_fly,
++		.driver_data = (void *)&oxp_apex,
  	},
  	{
  		.matches = {
-@@ -426,7 +444,7 @@ static const struct dmi_system_id dmi_table[] = {
+@@ -467,7 +483,7 @@ static const struct dmi_system_id dmi_table[] = {
  			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
  			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO"),
  		},
--		.driver_data = (void *)oxp_fly,
-+		.driver_data = (void *)oxp_apex,
+-		.driver_data = (void *)&oxp_fly,
++		.driver_data = (void *)&oxp_apex,
  	},
  	{},
  };

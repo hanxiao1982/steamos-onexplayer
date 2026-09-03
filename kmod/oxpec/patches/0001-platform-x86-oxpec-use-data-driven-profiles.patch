@@ -1,26 +1,39 @@
-From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+From 64eb2bb0a8d964e96a7a139cdcb900a12ae4878c Mon Sep 17 00:00:00 2001
+From: Xiao Han <hanxiao@live.com>
+Date: Thu, 3 Sep 2026 18:09:46 +0000
 Subject: [PATCH 1/3] platform/x86: oxpec: Use data-driven EC profiles
 
-The board enum is currently used by several switch statements to select
-fan registers, PWM ranges, turbo controls, turbo LED support and charge
-controls. Store those values in a profile table indexed by the existing
-enum instead.
+Replace board-specific register switch statements with immutable EC profiles.
 
-Keep the enum values and DMI table unchanged so this is a mechanical
-refactor with no intended functional change.
+Point DMI driver_data directly at each profile and validate mandatory
+registers and paired optional fields once during driver initialization.
+This keeps existing supported-board behavior while making incomplete
+profiles fail closed before any EC access.
 
 Signed-off-by: Xiao Han <hanxiao@live.com>
 ---
- drivers/platform/x86/oxpec.c | 260 ++++++++++++++++++-----------------
- 1 file changed, 134 insertions(+), 126 deletions(-)
+ drivers/platform/x86/oxpec.c | 505 ++++++++++++++++-------------------
+ 1 file changed, 236 insertions(+), 269 deletions(-)
 
 diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
+index 34bb17f..ab86bf4 100644
 --- a/drivers/platform/x86/oxpec.c
 +++ b/drivers/platform/x86/oxpec.c
-@@ -50,7 +50,27 @@ enum oxp_board {
- 	oxp_g1_a,
- };
+@@ -39,20 +39,25 @@ static bool unlock_global_acpi_lock(void)
+ 	return ACPI_SUCCESS(acpi_release_global_lock(oxp_mutex));
+ }
  
+-enum oxp_board {
+-	aok_zoe_a1 = 1,
+-	orange_pi_neo,
+-	oxp_2,
+-	oxp_fly,
+-	oxp_mini_amd,
+-	oxp_mini_amd_a07,
+-	oxp_mini_amd_pro,
+-	oxp_x1,
+-	oxp_g1_i,
+-	oxp_g1_a,
 +struct oxp_ec_profile {
 +	u8 fan_reg;
 +	u8 pwm_enable_reg;
@@ -37,121 +50,376 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
 +	u8 charge_inhibit_mask_awake;
 +	u8 charge_inhibit_mask_off;
 +	bool amd_only;
-+};
-+
- static enum oxp_board board;
+ };
+ 
+-static enum oxp_board board;
 +static const struct oxp_ec_profile *profile;
  static struct device *oxp_dev;
  
  /* Fan reading and PWM */
-@@ -94,6 +114,113 @@ static struct device *oxp_dev;
+@@ -99,202 +104,333 @@ static struct device *oxp_dev;
  #define OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS	(OXP_X1_CHARGE_INHIBIT_MASK_AWAKE | \
  						 OXP_X1_CHARGE_INHIBIT_MASK_OFF)
  
-+static const struct oxp_ec_profile oxp_ec_profiles[] = {
-+	[aok_zoe_a1] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 255,
-+		.turbo_reg = OXP_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+	},
-+	[orange_pi_neo] = {
-+		.fan_reg = ORANGEPI_SENSOR_FAN_REG,
-+		.pwm_enable_reg = ORANGEPI_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = ORANGEPI_SENSOR_PWM_REG,
-+		.pwm_min = 1,
-+		.pwm_max = 244,
-+	},
-+	[oxp_2] = {
-+		.fan_reg = OXP_2_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 184,
-+		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+	},
-+	[oxp_fly] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 255,
-+		.turbo_reg = OXP_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
-+		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
-+		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
-+		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
-+	},
-+	[oxp_mini_amd] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 100,
-+		.amd_only = true,
-+	},
-+	[oxp_mini_amd_a07] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 100,
-+		.turbo_reg = OXP_MINI_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_MINI_TURBO_TAKE_VAL,
-+	},
-+	[oxp_mini_amd_pro] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 255,
-+		.turbo_reg = OXP_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+	},
-+	[oxp_x1] = {
-+		.fan_reg = OXP_2_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 184,
-+		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+		.turbo_led_reg = OXP_X1_TURBO_LED_REG,
-+		.turbo_led_off = OXP_X1_TURBO_LED_OFF,
-+		.turbo_led_on = OXP_X1_TURBO_LED_ON,
-+		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
-+		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
-+		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
-+		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
-+	},
-+	[oxp_g1_i] = {
-+		.fan_reg = OXP_2_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 184,
-+		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
-+		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
-+		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
-+		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
-+	},
-+	[oxp_g1_a] = {
-+		.fan_reg = OXP_SENSOR_FAN_REG,
-+		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
-+		.pwm_reg = OXP_SENSOR_PWM_REG,
-+		.pwm_max = 255,
-+		.turbo_reg = OXP_TURBO_SWITCH_REG,
-+		.turbo_mask = OXP_TURBO_TAKE_VAL,
-+		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
-+		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
-+		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
-+		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
-+	},
++static const struct oxp_ec_profile aok_zoe_a1 = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 255,
++	.turbo_reg = OXP_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
 +};
++
++static const struct oxp_ec_profile orange_pi_neo = {
++	.fan_reg = ORANGEPI_SENSOR_FAN_REG,
++	.pwm_enable_reg = ORANGEPI_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = ORANGEPI_SENSOR_PWM_REG,
++	.pwm_min = 1,
++	.pwm_max = 244,
++};
++
++static const struct oxp_ec_profile oxp_2 = {
++	.fan_reg = OXP_2_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 184,
++	.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++};
++
++static const struct oxp_ec_profile oxp_fly = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 255,
++	.turbo_reg = OXP_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++	.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++	.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++	.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++};
++
++static const struct oxp_ec_profile oxp_mini_amd = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 100,
++	.amd_only = true,
++};
++
++static const struct oxp_ec_profile oxp_mini_amd_a07 = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 100,
++	.turbo_reg = OXP_MINI_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_MINI_TURBO_TAKE_VAL,
++};
++
++static const struct oxp_ec_profile oxp_mini_amd_pro = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 255,
++	.turbo_reg = OXP_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++};
++
++static const struct oxp_ec_profile oxp_x1 = {
++	.fan_reg = OXP_2_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 184,
++	.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++	.turbo_led_reg = OXP_X1_TURBO_LED_REG,
++	.turbo_led_off = OXP_X1_TURBO_LED_OFF,
++	.turbo_led_on = OXP_X1_TURBO_LED_ON,
++	.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++	.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++	.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++};
++
++static const struct oxp_ec_profile oxp_g1_i = {
++	.fan_reg = OXP_2_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 184,
++	.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++	.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++	.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++	.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++};
++
++static const struct oxp_ec_profile oxp_g1_a = {
++	.fan_reg = OXP_SENSOR_FAN_REG,
++	.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++	.pwm_reg = OXP_SENSOR_PWM_REG,
++	.pwm_max = 255,
++	.turbo_reg = OXP_TURBO_SWITCH_REG,
++	.turbo_mask = OXP_TURBO_TAKE_VAL,
++	.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++	.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++	.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++};
++
++static bool oxp_ec_profile_valid(const struct oxp_ec_profile *profile)
++{
++	if (!profile || !profile->fan_reg || !profile->pwm_enable_reg ||
++	    !profile->pwm_reg || !profile->pwm_max)
++		return false;
++
++	if (profile->pwm_min >= profile->pwm_max)
++		return false;
++
++	if (!!profile->turbo_reg != !!profile->turbo_mask)
++		return false;
++
++	if (!!profile->turbo_led_reg != !!profile->turbo_led_off ||
++	    !!profile->turbo_led_reg != !!profile->turbo_led_on)
++		return false;
++
++	if (!!profile->charge_limit_reg != !!profile->charge_inhibit_reg ||
++	    !!profile->charge_inhibit_reg != !!profile->charge_inhibit_mask_awake ||
++	    !!profile->charge_inhibit_reg != !!profile->charge_inhibit_mask_off)
++		return false;
++
++	return true;
++}
 +
  static const struct dmi_system_id dmi_table[] = {
  	{
  		.matches = {
-@@ -342,20 +469,7 @@ static int write_to_ec(u8 reg, u8 value)
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "AOKZOE"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AOKZOE A1 AR07"),
+ 		},
+-		.driver_data = (void *)aok_zoe_a1,
++		.driver_data = (void *)&aok_zoe_a1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "AOKZOE"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AOKZOE A1 Pro"),
+ 		},
+-		.driver_data = (void *)aok_zoe_a1,
++		.driver_data = (void *)&aok_zoe_a1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "AOKZOE"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AOKZOE A2 Pro"),
+ 		},
+-		.driver_data = (void *)aok_zoe_a1,
++		.driver_data = (void *)&aok_zoe_a1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "AOKZOE"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AOKZOE A1X"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "OrangePi"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "NEO-01"),
+ 		},
+-		.driver_data = (void *)orange_pi_neo,
++		.driver_data = (void *)&orange_pi_neo,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONE XPLAYER"),
+ 		},
+-		.driver_data = (void *)oxp_mini_amd,
++		.driver_data = (void *)&oxp_mini_amd,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2"),
+ 		},
+-		.driver_data = (void *)oxp_2,
++		.driver_data = (void *)&oxp_2,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER F1"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER F1 EVA-01"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER F1 OLED"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER F1L"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER F1Pro"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER F1 EVA-02"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER G1 A"),
+ 		},
+-		.driver_data = (void *)oxp_g1_a,
++		.driver_data = (void *)&oxp_g1_a,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER SUPER X"),
+ 		},
+-		.driver_data = (void *)oxp_g1_a,
++		.driver_data = (void *)&oxp_g1_a,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER G1 i"),
+ 		},
+-		.driver_data = (void *)oxp_g1_i,
++		.driver_data = (void *)&oxp_g1_i,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER mini A07"),
+ 		},
+-		.driver_data = (void *)oxp_mini_amd_a07,
++		.driver_data = (void *)&oxp_mini_amd_a07,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER Mini Pro"),
+ 		},
+-		.driver_data = (void *)oxp_mini_amd_pro,
++		.driver_data = (void *)&oxp_mini_amd_pro,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1z"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1 A"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1 i"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1Air"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1 mini"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1Mini Pro"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1Pro"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X1Pro EVA-02"),
+ 		},
+-		.driver_data = (void *)oxp_x1,
++		.driver_data = (void *)&oxp_x1,
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO"),
+ 		},
+-		.driver_data = (void *)oxp_fly,
++		.driver_data = (void *)&oxp_fly,
+ 	},
+ 	{},
+ };
+@@ -343,27 +479,14 @@ static int write_to_ec(u8 reg, u8 value)
  static umode_t tt_toggle_is_visible(struct kobject *kobj,
  				    struct attribute *attr, int n)
  {
@@ -173,7 +441,6 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  }
  
  static ssize_t tt_toggle_store(struct device *dev,
-@@ -363,7 +477,7 @@ static ssize_t tt_toggle_store(struct device *dev,
  			       struct device_attribute *attr, const char *buf,
  			       size_t count)
  {
@@ -182,7 +449,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  	long raw_val;
  	bool enable;
  	int ret;
-@@ -372,33 +486,17 @@ static ssize_t tt_toggle_store(struct device *dev,
+@@ -372,39 +495,20 @@ static ssize_t tt_toggle_store(struct device *dev,
  	if (ret)
  		return ret;
  
@@ -227,7 +494,8 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  	if (ret)
  		return ret;
  
-@@ -409,35 +507,15 @@ static ssize_t tt_toggle_show(struct device *dev,
+@@ -414,37 +518,18 @@ static ssize_t tt_toggle_store(struct device *dev,
+ static ssize_t tt_toggle_show(struct device *dev,
  			      struct device_attribute *attr, char *buf)
  {
 -	u8 reg, mask;
@@ -268,7 +536,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  }
  
  static DEVICE_ATTR_RW(tt_toggle);
-@@ -446,14 +524,7 @@ static DEVICE_ATTR_RW(tt_toggle);
+@@ -453,13 +538,7 @@ static DEVICE_ATTR_RW(tt_toggle);
  static umode_t tt_led_is_visible(struct kobject *kobj,
  				 struct attribute *attr, int n)
  {
@@ -283,7 +551,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  }
  
  static ssize_t tt_led_store(struct device *dev,
-@@ -467,17 +538,12 @@ static ssize_t tt_led_store(struct device *dev,
+@@ -474,14 +553,10 @@ static ssize_t tt_led_store(struct device *dev,
  	if (ret)
  		return ret;
  
@@ -301,7 +569,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  
  	ret = write_to_ec(reg, val);
  	if (ret)
-@@ -495,16 +561,11 @@ static ssize_t tt_led_show(struct device *dev,
+@@ -498,14 +573,10 @@ static ssize_t tt_led_show(struct device *dev,
  	int ret;
  	u8 reg;
  
@@ -319,7 +587,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  
  	ret = read_from_ec(reg, 1, &val);
  	if (ret)
-@@ -518,17 +579,8 @@ static DEVICE_ATTR_RW(tt_led);
+@@ -519,16 +590,7 @@ static DEVICE_ATTR_RW(tt_led);
  /* Callbacks for charge behaviour attributes */
  static bool oxp_psy_ext_supported(void)
  {
@@ -337,7 +605,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  }
  
  static int oxp_psy_ext_get_prop(struct power_supply *psy,
-@@ -542,7 +594,7 @@ static int oxp_psy_ext_get_prop(struct power_supply *psy,
+@@ -542,7 +604,7 @@ static int oxp_psy_ext_get_prop(struct power_supply *psy,
  
  	switch (psp) {
  	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
@@ -346,7 +614,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  		if (ret)
  			return ret;
  		if (raw_val < 0 || raw_val > 100)
-@@ -550,12 +602,14 @@ static int oxp_psy_ext_get_prop(struct power_supply *psy,
+@@ -550,14 +612,16 @@ static int oxp_psy_ext_get_prop(struct power_supply *psy,
  		val->intval = raw_val;
  		return 0;
  	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
@@ -368,7 +636,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  			val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE_AWAKE;
  		else
  			val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO;
-@@ -577,7 +631,7 @@ static int oxp_psy_ext_set_prop(struct power_supply *psy,
+@@ -579,23 +643,24 @@ static int oxp_psy_ext_set_prop(struct power_supply *psy,
  	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
  		if (val->intval < 0 || val->intval > 100)
  			return -EINVAL;
@@ -377,7 +645,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
  		switch (val->intval) {
  		case POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO:
-@@ -585,17 +639,18 @@ static int oxp_psy_ext_set_prop(struct power_supply *psy,
+ 			raw_val = 0;
  			break;
  		case POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE_AWAKE:
 -			raw_val = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE;
@@ -397,7 +665,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  	default:
  		return -EINVAL;
  	}
-@@ -650,96 +705,41 @@ static struct acpi_battery_hook battery_hook = {
+@@ -644,62 +709,17 @@ static struct acpi_battery_hook battery_hook = {
  /* PWM enable/disable functions */
  static int oxp_pwm_enable(void)
  {
@@ -461,7 +729,9 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
 -	}
 +	return read_from_ec(profile->pwm_enable_reg, 1, val);
  }
-@@ -769,27 +769,7 @@ static umode_t oxp_ec_hwmon_is_visible(const void *drvdata,
+ 
+ /* Callbacks for hwmon interface */
+@@ -719,23 +739,7 @@ static umode_t oxp_ec_hwmon_is_visible(const void *drvdata,
  /* Fan speed read function */
  static int oxp_pwm_fan_speed(long *val)
  {
@@ -486,7 +756,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  }
  
  /* PWM input read/write functions */
-@@ -799,36 +779,15 @@ static int oxp_pwm_input_write(long val)
+@@ -744,71 +748,32 @@ static int oxp_pwm_input_write(long val)
  	if (val < 0 || val > 255)
  		return -EINVAL;
  
@@ -525,7 +795,6 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  }
  
  static int oxp_pwm_input_read(long *val)
-@@ -836,49 +795,21 @@ static int oxp_pwm_input_read(long *val)
  {
  	int ret;
  
@@ -578,11 +847,15 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
 +
  	return 0;
  }
-@@ -978,13 +909,14 @@ static int __init oxp_platform_init(void)
+ 
+@@ -982,14 +947,16 @@ static int __init oxp_platform_init(void)
+ 	if (!dmi_entry)
  		return -ENODEV;
  
- 	board = (enum oxp_board)(unsigned long)dmi_entry->driver_data;
-+	profile = &oxp_ec_profiles[board];
+-	board = (enum oxp_board)(unsigned long)dmi_entry->driver_data;
++	profile = dmi_entry->driver_data;
++	if (!oxp_ec_profile_valid(profile))
++		return -EINVAL;
  
  	/*
  	 * Have to check for AMD processor here because DMI strings are the same
@@ -594,5 +867,3 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  		return -ENODEV;
  
  	oxp_platform_device =
--- 
-2.51.0
