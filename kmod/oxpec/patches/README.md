@@ -23,6 +23,26 @@ bash kmod/scripts/apply-oxpec-patches.sh
 kmod/scripts/build.sh oxpec
 ```
 
+For staged testing, pass the last patch number to apply. The number means **apply through N**, not "apply only N":
+
+```bash
+kmod/scripts/fetch-oxpec.sh mainline
+
+# State after patch 1 only
+bash kmod/scripts/apply-oxpec-patches.sh 1
+kmod/scripts/build.sh oxpec
+
+# Continue the same source through patch 2; patch 1 is detected and skipped.
+bash kmod/scripts/apply-oxpec-patches.sh 2
+kmod/scripts/build.sh oxpec
+
+# Continue through patch 3.
+bash kmod/scripts/apply-oxpec-patches.sh 3
+kmod/scripts/build.sh oxpec
+```
+
+With no argument, or with `all`, the script applies the full series. Valid numeric values are `1` through the current number of entries in `series`. Already-applied prerequisite patches are detected with a reverse apply check and skipped, so the same fetched source can be advanced incrementally from patch 1 to 2 to 3.
+
 `fetch-oxpec.sh` deliberately remains a clean-source fetcher. Patch application is explicit so an unmodified upstream source and each intermediate patch state can be reviewed independently.
 
 For upstream submission, the files are already written against the kernel path `drivers/platform/x86/oxpec.c`; the local runner strips that prefix when applying them to the ignored `kmod/oxpec/oxpec.c` test copy.
