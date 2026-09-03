@@ -1,0 +1,76 @@
+Subject: [PATCH 2/3] platform/x86: oxpec: Split OneXPlayer 2 PWM profiles
+
+OneXConsole does not treat all ONEXPLAYER 2 boards as one EC profile.
+ARP23/ARP23P use PWM max 184 while GA18 and GA72-R use PWM max 255.
+
+---
+ drivers/platform/x86/oxpec.c | 47 +++++++++++++++++++++++++++++++++---
+ 1 file changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
+--- a/drivers/platform/x86/oxpec.c
++++ b/drivers/platform/x86/oxpec.c
+@@ -42,6 +42,7 @@ enum oxp_board {
+ 	aok_zoe_a1 = 1,
+ 	orange_pi_neo,
+ 	oxp_2,
++	oxp_2_ga18,
+ 	oxp_fly,
+ 	oxp_mini_amd,
+ 	oxp_mini_amd_a07,
+@@ -140,6 +141,15 @@ static const struct oxp_ec_profile oxp_ec_profiles[] = {
+ 		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
+ 		.turbo_mask = OXP_TURBO_TAKE_VAL,
+ 	},
++	[oxp_2_ga18] = {
++		.fan_reg = OXP_2_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 255,
++		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++	},
+ 	[oxp_fly] = {
+ 		.fan_reg = OXP_SENSOR_FAN_REG,
+ 		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
+@@ -255,9 +265,40 @@ static const struct dmi_system_id dmi_table[] = {
+ 	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+-			DMI_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 ARP23"),
+ 		},
+ 		.driver_data = (void *)oxp_2,
+ 	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 PRO ARP23P"),
++		},
++		.driver_data = (void *)oxp_2,
++	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 PRO ARP23P EVA-01"),
++		},
++		.driver_data = (void *)oxp_2,
++	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 GA18"),
++		},
++		.driver_data = (void *)oxp_2_ga18,
++	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 GA72-R"),
++		},
++		.driver_data = (void *)oxp_2_ga18,
++	},
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
