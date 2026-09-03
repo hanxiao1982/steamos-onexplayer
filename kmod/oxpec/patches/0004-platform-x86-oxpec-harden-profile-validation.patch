@@ -28,7 +28,7 @@ diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
  
  static const struct oxp_ec_profile aok_zoe_a1 = {
  	.fan_reg = OXP_SENSOR_FAN_REG,
-@@ -230,28 +228,63 @@ static const struct oxp_ec_profile oxp_g1_a = {
+@@ -230,26 +228,57 @@ static const struct oxp_ec_profile oxp_g1_a = {
  	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
  };
  
