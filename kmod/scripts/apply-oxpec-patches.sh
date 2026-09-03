@@ -20,6 +20,7 @@ Examples:
   $0 1     # apply through patch 1
   $0 2     # apply through patch 2
   $0 3     # apply through patch 3
+  $0 4     # apply through patch 4
 EOF
 }
 
