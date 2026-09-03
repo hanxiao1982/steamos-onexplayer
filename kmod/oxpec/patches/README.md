@@ -11,7 +11,7 @@ Baseline source:
 
 The patches are ordered by [`series`](series):
 
-1. `0001-platform-x86-oxpec-use-data-driven-profiles.patch` — structural refactor only; existing enum values, DMI matches and behaviour are intentionally preserved.
+1. `0001-platform-x86-oxpec-use-data-driven-profiles.patch` — structural refactor only for currently supported boards. DMI entries point directly at immutable `struct oxp_ec_profile` objects, profile invariants are validated once during init, and the existing board-specific switch behavior is replaced by profile fields without changing the supported-board register/scaling behavior.
 2. `0002-platform-x86-oxpec-split-onexplayer-2-profiles.patch` — vendor-profile correction for OXP2 ARP23/ARP23P (PWM 184) vs GA18/GA72-R (PWM 255), with exact DMI strings.
 3. `0003-platform-x86-oxpec-add-apex-profile.patch` — vendor-profile correction for APEX/X2 Mini PRO charge registers E5/E6.
 
@@ -30,9 +30,10 @@ kmod/scripts/fetch-oxpec.sh mainline
 
 # State after patch 1 only
 bash kmod/scripts/apply-oxpec-patches.sh 1
+python3 kmod/oxpec/tests/profile-refactor-mock.py kmod/oxpec/oxpec.c
 kmod/scripts/build.sh oxpec
 
-# Continue the same source through patch 2; patch 1 is detected and skipped.
+# Continue the same source through patch 2.
 bash kmod/scripts/apply-oxpec-patches.sh 2
 kmod/scripts/build.sh oxpec
 
@@ -41,8 +42,10 @@ bash kmod/scripts/apply-oxpec-patches.sh 3
 kmod/scripts/build.sh oxpec
 ```
 
-With no argument, or with `all`, the script applies the full series. Valid numeric values are `1` through the current number of entries in `series`. Already-applied prerequisite patches are detected with a reverse apply check and skipped, so the same fetched source can be advanced incrementally from patch 1 to 2 to 3.
+With no argument, or with `all`, the script applies the full series. Valid numeric values are `1` through the current number of entries in `series`. The runner records successfully applied patch names in the ignored `kmod/oxpec/.applied-patches` state file so the same fetched source can be advanced incrementally even when later patches modify context that was introduced by earlier patches. `fetch-oxpec.sh` removes this state file whenever it downloads a fresh source.
+
+The patch-1 mock parses the actual profile objects from the patched `oxpec.c` and compares their fan/PWM/turbo/LED/charge behavior against the pre-refactor switch logic over exhaustive byte/PWM domains. CI also verifies that the old `enum oxp_board`, profile-index array and `switch (board)` dispatch are gone, and that incomplete profiles are rejected by the init-time validator before EC helpers can use them.
 
 `fetch-oxpec.sh` deliberately remains a clean-source fetcher. Patch application is explicit so an unmodified upstream source and each intermediate patch state can be reviewed independently.
 
-For upstream submission, the files are already written against the kernel path `drivers/platform/x86/oxpec.c`; the local runner strips that prefix when applying them to the ignored `kmod/oxpec/oxpec.c` test copy.
+For upstream submission, the patch files are generated with `git format-patch` against the kernel path `drivers/platform/x86/oxpec.c`; the local runner strips that prefix when applying them to the ignored `kmod/oxpec/oxpec.c` test copy.
