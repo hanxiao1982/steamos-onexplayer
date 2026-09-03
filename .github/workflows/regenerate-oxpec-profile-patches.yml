@@ -6,6 +6,8 @@ on:
       - oxpec/profile-refactor
     paths:
       - 'kmod/scripts/regenerate-oxpec-profile-patches.py'
+      - 'kmod/scripts/apply-oxpec-patches.sh'
+      - 'kmod/scripts/fetch-oxpec.sh'
       - '.github/workflows/regenerate-oxpec-profile-patches.yml'
 
 permissions:
@@ -30,6 +32,7 @@ jobs:
           curl -fsSL \
             https://raw.githubusercontent.com/torvalds/linux/master/drivers/platform/x86/oxpec.c \
             -o kmod/oxpec/oxpec.c
+          rm -f kmod/oxpec/.applied-patches
           bash kmod/scripts/apply-oxpec-patches.sh 1
           grep -q 'profile = dmi_entry->driver_data' kmod/oxpec/oxpec.c
           grep -q 'oxp_ec_profile_valid' kmod/oxpec/oxpec.c
@@ -44,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f kmod/oxpec/oxpec.c
+          rm -f kmod/oxpec/oxpec.c kmod/oxpec/.applied-patches
           if git diff --quiet -- kmod/oxpec/patches/0001-platform-x86-oxpec-use-data-driven-profiles.patch \
                                kmod/oxpec/patches/0002-platform-x86-oxpec-split-onexplayer-2-profiles.patch \
                                kmod/oxpec/patches/0003-platform-x86-oxpec-add-apex-profile.patch; then
