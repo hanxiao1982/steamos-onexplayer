@@ -6,19 +6,15 @@ SteamOS / Linux bring-up notes for OneXPlayer handhelds.
 real-world use. Do not install the kernel modules, scripts, or other artifacts
 on a device you care about. Production use is not recommended at this time.
 
-## EC register maps
+## EC support
 
-From OneXConsole 0.10.2-fix8. Installer and unpacked binaries are not in this repo.
+The EC model is derived from OneXConsole 0.10.2-fix8. The vendor application has two EC access types, mapped to two independent Linux drivers:
 
-Two platforms, two maps:
+- [docs/ec/oxpec.md](docs/ec/oxpec.md) — OneXConsole type 1 devices; direct EC register profiles for Linux `oxpec`.
+- [docs/ec/oxp-wmi.md](docs/ec/oxp-wmi.md) — OneXConsole type 2 devices; `SuRwECRegInterface` / Linux `oxp-wmi`.
+- [docs/ec/README.md](docs/ec/README.md) — ownership rules, source hierarchy and DMI matching guidance.
+- [docs/ec/onexconsole-api.md](docs/ec/onexconsole-api.md) — retained OneXConsole / CompatLayerCT reverse-engineering details.
+- [docs/ec/tdp.md](docs/ec/tdp.md) — Steam `TdpLimit1` via Intel RAPL (not EC).
+- [linux/oxp-wmi/](linux/oxp-wmi/) — out-of-tree OxpWMI client.
 
-- [docs/ec/x2-mini.md](docs/ec/x2-mini.md) — Intel Arc G3 Extreme (X2 Mini, X2, OneXPlayer 3, Apex Air, …)
-- [docs/ec/x2-mini-pro.md](docs/ec/x2-mini-pro.md) — AMD (X2 Mini PRO, APEX)
-- [docs/ec/README.md](docs/ec/README.md) — merged platform table
-- [docs/ec/access.md](docs/ec/access.md) — WinRing0 vs OxpWMI vs Linux `oxpec` / `oxp-wmi`
-- [docs/ec/linux-wmi.md](docs/ec/linux-wmi.md) — kernel WMI / MSI Claw G3E vs OxpWMI
-- [docs/ec/oxp-wmi.md](docs/ec/oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer Intel / OxpWMI)
-- [docs/ec/tdp.md](docs/ec/tdp.md) — Steam `TdpLimit1` via Intel RAPL (not EC)
-- [linux/oxp-wmi/](linux/oxp-wmi/) — out-of-tree Intel OxpWMI client (`WMAC` Integer Arg2)
-- X2 Mini deploy uses `kmod/scripts` (`ec-stack.sh` → `build.sh oxp-wmi` → manual `test-oxp-wmi.sh`); see [docs/local-build-and-deploy.md](docs/local-build-and-deploy.md)
-- [docs/ec/maps.yaml](docs/ec/maps.yaml) — machine-readable tables
+The two EC modules are intentionally separate. A device should bind to exactly one of them according to the exact OneXConsole DMI/access-type mapping; the mere presence of the WMI provider is not sufficient to select `oxp-wmi`.
