@@ -1,4 +1,5 @@
 oxpec.c
+.applied-patches
 *.o
 *.ko
 *.mod
