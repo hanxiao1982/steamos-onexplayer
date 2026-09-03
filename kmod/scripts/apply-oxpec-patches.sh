@@ -25,7 +25,16 @@ while IFS= read -r patch_name; do
   fi
 
   echo "Applying ${patch_name}"
-  patch --batch --forward -d "${OXP_DIR}" -p4 < "${patch_file}"
+  # The repository stores mail-style patches for a kernel-tree path
+  # (drivers/platform/x86/oxpec.c), while the fetched test source lives at
+  # kmod/oxpec/oxpec.c.  -p4 removes a/drivers/platform/x86/ and --directory
+  # redirects the result to the local out-of-tree test directory.
+  #
+  # --recount deliberately derives hunk sizes from the actual patch body.
+  # This also makes the local test runner robust against stale hunk line-count
+  # metadata while retaining normal context validation.
+  git -C "${ROOT}" apply --recount --verbose --whitespace=nowarn \
+    -p4 --directory=kmod/oxpec "${patch_file}"
 done < "${SERIES}"
 
 echo "Applied oxpec patch series to ${SOURCE}"
