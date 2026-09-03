@@ -34,10 +34,31 @@ jobs:
             exit 1
           fi
 
-      - name: Apply patch series
-        run: bash kmod/scripts/apply-oxpec-patches.sh
+      - name: Apply through patch 1
+        run: bash kmod/scripts/apply-oxpec-patches.sh 1
 
-      - name: Check resulting profiles
+      - name: Check patch 1 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'struct oxp_ec_profile' kmod/oxpec/oxpec.c
+          ! grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
+          ! grep -q 'oxp_apex' kmod/oxpec/oxpec.c
+
+      - name: Continue through patch 2
+        run: bash kmod/scripts/apply-oxpec-patches.sh 2
+
+      - name: Check patch 2 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
+          ! grep -q 'oxp_apex' kmod/oxpec/oxpec.c
+
+      - name: Continue through patch 3
+        run: bash kmod/scripts/apply-oxpec-patches.sh 3
+
+      - name: Check final profile state
         shell: bash
         run: |
           set -euo pipefail
