@@ -82,7 +82,7 @@ out[1…] = payload
 | `0x51` | PL2 / SPPT (LE32 watts) |
 | `0xd7` | Charge end threshold (0–100) |
 
-Kernel call site (the mutex + evaluate *shape* to copy, not the MSI methods or Buffer Arg2):
+Kernel call site (the mutex + evaluate *shape* to copy, not the MSI methods or payload layout):
 
 ```c
 status = wmidev_evaluate_method(data->wdev, 0x0, method, &in, &out);
@@ -103,7 +103,7 @@ Not the same ABI. Do **not** bind `msi-wmi-platform` to a OneXPlayer DMI id.
 | GUID | `43B5A593-AD62-4257-8546-91B0797BEC1B` (X2 Mini Windows `guid` qualifier) | `ABBC0F6E-8EA1-11D1-00A0-C90629100000` |
 | Read | `ReadECReg(GroupOffset)` | `Get_Data` / `Get_Fan` / … |
 | Write | `WriteECReg(GroupOffsetValue)` | `Set_Data` / `Set_Fan` / … |
-| Address | UInt32 LE `04 reg 00 00`; write `04 reg val 00` (Integer Arg2) | 8-bit `buffer[0]` (or fan subfeature) |
+| Address | MOF UInt32 serialized LE as `04 reg 00 00`; write `04 reg val 00` | 8-bit `buffer[0]` (or fan subfeature) |
 | Payload | hex string / 8-byte block in out-params | fixed 32-byte ACPI buffer |
 | Fan | EC `0x58`/`0x59` (BE16 RPM) | `Get_Fan` raw, `480000/raw` |
 | TDP | EC gate `0xED` + Intel MSR | WMI `0x50`/`0x51` watts |
@@ -156,9 +156,9 @@ JS `0x400+reg` (`0x458`) is the opposite 16-bit view and is **rejected** (`uStri
 | `0x60` | `0x6004` | `0x2A` | board sensor **42 °C** |
 | `0xA0` | `0xA004` | `0x00` | battery temp; **ignore** (always 0 on X2 Mini) |
 
-Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. Reads are validated on Windows. Writes (same Integer packing) are validated on Windows CIM and on Linux `oxp-wmi` (X2 Mini Bazzite: manual ~60% ≈ 4400 RPM).
+Fan 320 RPM + PWM 37/184 matches a quiet auto curve. CPU 49 °C > board 42 °C. Reads are validated on Windows. Writes using the same numeric packing are validated on Windows CIM and on Linux `oxp-wmi` (X2 Mini Bazzite: manual ~60% ≈ 4400 RPM).
 
-`WriteECReg` packing (X2 Mini CIM, confirmed). Arg2 is ACPI **Integer** (`UInt32`), not a Buffer:
+`WriteECReg` packing (X2 Mini CIM, confirmed). CIM exposes a MOF `UInt32`; ACPI-WMI serializes it into the four-byte Buffer consumed by `WMAC`:
 
 ```
 GroupOffsetValue = 0x04 | (reg << 8) | (value << 16)
@@ -172,11 +172,11 @@ Fan apply: `0x4A=1` then **WriteECReg `0x4B` again** even if readback already ma
 
 ## Linux oxp-wmi
 
-The client is [`oxp-wmi`](oxp-wmi.md) (`linux/oxp-wmi/`). It copies the **mutex + evaluate** shape from `msi-wmi-platform`, not the method table or Buffer Arg2.
+The client is [`oxp-wmi`](oxp-wmi.md) (`linux/oxp-wmi/`). It copies the **mutex + evaluate** shape from `msi-wmi-platform`, not the method table or buffer layout.
 
 1. `struct wmi_driver` + GUID `43B5A593-AD62-4257-8546-91B0797BEC1B`.
-2. `acpi_evaluate_object(handle, "WMAC", …)` with Integer Arg2. `wmidev_evaluate_method()` Buffer Arg2 does **not** drive the fan here; fallback only if WMAC is missing. Apply is `WriteECReg=2`. Do not use method 3 as apply.
-3. Integer packing: read `0x04 | (reg << 8)`; write `| (value << 16)`. Parse STRING `"0x00,0xNN,…"`. After `0x4A=1`, rewrite `0x4B` to latch PWM.
+2. `wmidev_evaluate_method()` with a four-byte little-endian Buffer containing the MOF `UInt32`. WMI core resolves `_WDG` object ID `AC` to `WMAC`. Apply is `WriteECReg=2`; do not use method 3 as apply.
+3. UInt32 packing: read `0x04 | (reg << 8)`; write `| (value << 16)`. Parse STRING `"0x00,0xNN,…"`. After `0x4A=1`, rewrite `0x4B` to latch PWM.
 4. Register map from [x2-mini.md](x2-mini.md). Skip `0xEB` / `0xA5` on X2 Mini.
 5. Leave `oxpec` `ec_read`/`ec_write` for AMD.
 
@@ -265,7 +265,7 @@ Each `PNP0C14` `_WDG` entry is 20 bytes:
 | 18 | instance count |
 | 19 | flags: `0x02` = has WMI method |
 
-Keep `flags & 0x02` as the usual filter. Object id `XX` maps to ACPI method **`WMXX`** (`BA` → `WMBA`). X2 Mini live: `object_id=AC` → `WMAC`; bind that method even if `_WDG` flags look wrong (the driver does not require the METHOD bit).
+Keep `flags & 0x02` as the required method filter. Object id `XX` maps to ACPI method **`WMXX`** (`AC` → `WMAC`). In the X2 Mini V5.04 DSDT, the target entry has `object_id=AC`, one instance, and valid flags `0x02`, so the normal WMI core path binds it without a quirk.
 
 Disassemble each `WMxx`. **That** is the “is this the EC?” test:
 
@@ -283,6 +283,31 @@ The object that is both a method GUID and AML that hits the EC / `0x400` is OxpW
 - GUID happens to be `ABBC0F6E-8EA1-11D1-00A0-C90629100000` (MSI / Microsoft sample). Confirm with class name or AML on OneXPlayer; do not treat it as Claw `Get_Data`
 - `oxpec` `ec_read` works: that only means ACPI EC is also present. It does **not** replace the WMI GUID. OneXConsole still uses WMI on Intel OxpWMI SKUs
 
-### 4. Driver bind (done on X2 Mini)
+### 4. Firmware ABI (X2 Mini V5.04)
 
-GUID, method IDs, Integer Arg2, packing, and `uStringReturn` are confirmed. Linux [`oxp-wmi`](oxp-wmi.md) binds `43B5A593-…` and calls `WMAC`. Fan PWM is live on Bazzite. Charge sysfs is wired the same way but not soak-tested. `oxpec` `ec_read` is a separate AMD / fallback path.
+The extracted DSDT and embedded BMOF establish all three layers:
+
+| Layer | Representation |
+|---|---|
+| BMOF / CIM | input property `uint32` |
+| ACPI-WMI | third `WMAC` argument is a Buffer |
+| `WMAC` | byte 0 `GRPN`, byte 1 `OFFR`, byte 2 `WTDT` |
+
+`WMAC` uses `CreateByteField(Arg2, 0..2)` and accesses a `SystemMemory`
+OperationRegion at `0xFE0B0000 + GRPN * 0x100 + OFFR`. A direct ACPI Integer
+call also works because ACPICA implicitly converts it to a little-endian
+Buffer; that is compatible behavior, not the native WMI method ABI.
+
+`WMAC` is `NotSerialized`; the one-byte helper methods it invokes are
+`Serialized`. The Linux client still holds a mutex across each whole WMI call.
+The V5.04 implementation of method 3 writes one byte and reads that same offset
+back, despite the broader multi-register wording in the BMOF.
+
+Offline `acpiexec` execution of the extracted DSDT produced the same result for
+Integer `0x5804` and Buffer `{ 04, 58, 00, 00 }`. No extracted SSDT contains a
+second `WMAC` definition.
+
+GUID, method IDs, UInt32 packing, Buffer transport, and `uStringReturn` are
+therefore confirmed. Linux [`oxp-wmi`](oxp-wmi.md) binds `43B5A593-…` through
+the WMI core. Fan PWM is live on Bazzite. Charge sysfs is wired the same way
+but not soak-tested. `oxpec` `ec_read` is a separate AMD / fallback path.
