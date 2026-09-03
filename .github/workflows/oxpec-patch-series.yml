@@ -43,4 +43,5 @@ jobs:
           set -euo pipefail
           grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
           grep -q 'oxp_apex' kmod/oxpec/oxpec.c
-          grep -q 'charge_limit_reg = 0xE5' kmod/oxpec/oxpec.c
+          grep -Eq '#define[[:space:]]+OXP_APEX_CHARGE_LIMIT_REG[[:space:]]+0xE5' kmod/oxpec/oxpec.c
+          grep -Eq '#define[[:space:]]+OXP_APEX_CHARGE_INHIBIT_REG[[:space:]]+0xE6' kmod/oxpec/oxpec.c
