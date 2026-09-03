@@ -1,0 +1,598 @@
+From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+Subject: [PATCH 1/3] platform/x86: oxpec: Use data-driven EC profiles
+
+The board enum is currently used by several switch statements to select
+fan registers, PWM ranges, turbo controls, turbo LED support and charge
+controls. Store those values in a profile table indexed by the existing
+enum instead.
+
+Keep the enum values and DMI table unchanged so this is a mechanical
+refactor with no intended functional change.
+
+Signed-off-by: Xiao Han <hanxiao@live.com>
+---
+ drivers/platform/x86/oxpec.c | 260 ++++++++++++++++++-----------------
+ 1 file changed, 134 insertions(+), 126 deletions(-)
+
+diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
+--- a/drivers/platform/x86/oxpec.c
++++ b/drivers/platform/x86/oxpec.c
+@@ -50,7 +50,27 @@ enum oxp_board {
+ 	oxp_g1_a,
+ };
+ 
++struct oxp_ec_profile {
++	u8 fan_reg;
++	u8 pwm_enable_reg;
++	u8 pwm_reg;
++	u8 pwm_min;
++	u8 pwm_max;
++	u8 turbo_reg;
++	u8 turbo_mask;
++	u8 turbo_led_reg;
++	u8 turbo_led_off;
++	u8 turbo_led_on;
++	u8 charge_limit_reg;
++	u8 charge_inhibit_reg;
++	u8 charge_inhibit_mask_awake;
++	u8 charge_inhibit_mask_off;
++	bool amd_only;
++};
++
+ static enum oxp_board board;
++static const struct oxp_ec_profile *profile;
+ static struct device *oxp_dev;
+ 
+ /* Fan reading and PWM */
+@@ -94,6 +114,113 @@ static struct device *oxp_dev;
+ #define OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS	(OXP_X1_CHARGE_INHIBIT_MASK_AWAKE | \
+ 						 OXP_X1_CHARGE_INHIBIT_MASK_OFF)
+ 
++static const struct oxp_ec_profile oxp_ec_profiles[] = {
++	[aok_zoe_a1] = {
++		.fan_reg = OXP_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 255,
++		.turbo_reg = OXP_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++	},
++	[orange_pi_neo] = {
++		.fan_reg = ORANGEPI_SENSOR_FAN_REG,
++		.pwm_enable_reg = ORANGEPI_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = ORANGEPI_SENSOR_PWM_REG,
++		.pwm_min = 1,
++		.pwm_max = 244,
++	},
++	[oxp_2] = {
++		.fan_reg = OXP_2_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 184,
++		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++	},
++	[oxp_fly] = {
++		.fan_reg = OXP_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 255,
++		.turbo_reg = OXP_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++	},
++	[oxp_mini_amd] = {
++		.fan_reg = OXP_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 100,
++		.amd_only = true,
++	},
++	[oxp_mini_amd_a07] = {
++		.fan_reg = OXP_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 100,
++		.turbo_reg = OXP_MINI_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_MINI_TURBO_TAKE_VAL,
++	},
++	[oxp_mini_amd_pro] = {
++		.fan_reg = OXP_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 255,
++		.turbo_reg = OXP_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++	},
++	[oxp_x1] = {
++		.fan_reg = OXP_2_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 184,
++		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++		.turbo_led_reg = OXP_X1_TURBO_LED_REG,
++		.turbo_led_off = OXP_X1_TURBO_LED_OFF,
++		.turbo_led_on = OXP_X1_TURBO_LED_ON,
++		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++	},
++	[oxp_g1_i] = {
++		.fan_reg = OXP_2_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 184,
++		.turbo_reg = OXP_2_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++	},
++	[oxp_g1_a] = {
++		.fan_reg = OXP_SENSOR_FAN_REG,
++		.pwm_enable_reg = OXP_SENSOR_PWM_ENABLE_REG,
++		.pwm_reg = OXP_SENSOR_PWM_REG,
++		.pwm_max = 255,
++		.turbo_reg = OXP_TURBO_SWITCH_REG,
++		.turbo_mask = OXP_TURBO_TAKE_VAL,
++		.charge_limit_reg = OXP_X1_CHARGE_LIMIT_REG,
++		.charge_inhibit_reg = OXP_X1_CHARGE_INHIBIT_REG,
++		.charge_inhibit_mask_awake = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE,
++		.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
++	},
++};
++
+ static const struct dmi_system_id dmi_table[] = {
+ 	{
+ 		.matches = {
+@@ -342,20 +469,7 @@ static int write_to_ec(u8 reg, u8 value)
+ static umode_t tt_toggle_is_visible(struct kobject *kobj,
+ 				    struct attribute *attr, int n)
+ {
+-	switch (board) {
+-	case aok_zoe_a1:
+-	case oxp_2:
+-	case oxp_fly:
+-	case oxp_mini_amd_a07:
+-	case oxp_mini_amd_pro:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-	case oxp_g1_a:
+-		return attr->mode;
+-	default:
+-		break;
+-	}
+-	return 0;
++	return profile->turbo_reg ? attr->mode : 0;
+ }
+ 
+ static ssize_t tt_toggle_store(struct device *dev,
+@@ -363,7 +477,7 @@ static ssize_t tt_toggle_store(struct device *dev,
+ 			       struct device_attribute *attr, const char *buf,
+ 			       size_t count)
+ {
+-	u8 reg, mask, val;
++	u8 val;
+ 	long raw_val;
+ 	bool enable;
+ 	int ret;
+@@ -372,33 +486,17 @@ static ssize_t tt_toggle_store(struct device *dev,
+ 	if (ret)
+ 		return ret;
+ 
+-	switch (board) {
+-	case oxp_mini_amd_a07:
+-		reg = OXP_MINI_TURBO_SWITCH_REG;
+-		mask = OXP_MINI_TURBO_TAKE_VAL;
+-		break;
+-	case aok_zoe_a1:
+-	case oxp_fly:
+-	case oxp_mini_amd_pro:
+-	case oxp_g1_a:
+-		reg = OXP_TURBO_SWITCH_REG;
+-		mask = OXP_TURBO_TAKE_VAL;
+-		break;
+-	case oxp_2:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-		reg = OXP_2_TURBO_SWITCH_REG;
+-		mask = OXP_TURBO_TAKE_VAL;
+-		break;
+-	default:
++	if (!profile->turbo_reg)
+ 		return -EINVAL;
+-	}
+ 
+-	ret = read_from_ec(reg, 1, &raw_val);
++	ret = read_from_ec(profile->turbo_reg, 1, &raw_val);
+ 	if (ret)
+ 		return ret;
+ 
+ 	val = raw_val;
+ 	if (enable)
+-		val |= mask;
++		val |= profile->turbo_mask;
+ 	else
+-		val &= ~mask;
++		val &= ~profile->turbo_mask;
+ 
+-	ret = write_to_ec(reg, val);
++	ret = write_to_ec(profile->turbo_reg, val);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -409,35 +507,15 @@ static ssize_t tt_toggle_show(struct device *dev,
+ 			      struct device_attribute *attr, char *buf)
+ {
+-	u8 reg, mask;
+ 	int retval;
+ 	long val;
+ 
+-	switch (board) {
+-	case oxp_mini_amd_a07:
+-		reg = OXP_MINI_TURBO_SWITCH_REG;
+-		mask = OXP_MINI_TURBO_TAKE_VAL;
+-		break;
+-	case aok_zoe_a1:
+-	case oxp_fly:
+-	case oxp_mini_amd_pro:
+-	case oxp_g1_a:
+-		reg = OXP_TURBO_SWITCH_REG;
+-		mask = OXP_TURBO_TAKE_VAL;
+-		break;
+-	case oxp_2:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-		reg = OXP_2_TURBO_SWITCH_REG;
+-		mask = OXP_TURBO_TAKE_VAL;
+-		break;
+-	default:
++	if (!profile->turbo_reg)
+ 		return -EINVAL;
+-	}
+ 
+-	retval = read_from_ec(reg, 1, &val);
++	retval = read_from_ec(profile->turbo_reg, 1, &val);
+ 	if (retval)
+ 		return retval;
+ 
+-	return sysfs_emit(buf, "%d\n", (val & mask) == mask);
++	return sysfs_emit(buf, "%d\n",
++			  (val & profile->turbo_mask) == profile->turbo_mask);
+ }
+ 
+ static DEVICE_ATTR_RW(tt_toggle);
+@@ -446,14 +524,7 @@ static DEVICE_ATTR_RW(tt_toggle);
+ static umode_t tt_led_is_visible(struct kobject *kobj,
+ 				 struct attribute *attr, int n)
+ {
+-	switch (board) {
+-	case oxp_x1:
+-		return attr->mode;
+-	default:
+-		break;
+-	}
+-	return 0;
++	return profile->turbo_led_reg ? attr->mode : 0;
+ }
+ 
+ static ssize_t tt_led_store(struct device *dev,
+@@ -467,17 +538,12 @@ static ssize_t tt_led_store(struct device *dev,
+ 	if (ret)
+ 		return ret;
+ 
+-	switch (board) {
+-	case oxp_x1:
+-		reg = OXP_X1_TURBO_LED_REG;
+-		val = value ? OXP_X1_TURBO_LED_ON : OXP_X1_TURBO_LED_OFF;
+-		break;
+-	default:
++	if (!profile->turbo_led_reg)
+ 		return -EINVAL;
+-	}
++	reg = profile->turbo_led_reg;
++	val = value ? profile->turbo_led_on : profile->turbo_led_off;
+ 
+ 	ret = write_to_ec(reg, val);
+ 	if (ret)
+@@ -495,16 +561,11 @@ static ssize_t tt_led_show(struct device *dev,
+ 	int ret;
+ 	u8 reg;
+ 
+-	switch (board) {
+-	case oxp_x1:
+-		reg = OXP_X1_TURBO_LED_REG;
+-		enval = OXP_X1_TURBO_LED_ON;
+-		break;
+-	default:
++	if (!profile->turbo_led_reg)
+ 		return -EINVAL;
+-	}
++	reg = profile->turbo_led_reg;
++	enval = profile->turbo_led_on;
+ 
+ 	ret = read_from_ec(reg, 1, &val);
+ 	if (ret)
+@@ -518,17 +579,8 @@ static DEVICE_ATTR_RW(tt_led);
+ /* Callbacks for charge behaviour attributes */
+ static bool oxp_psy_ext_supported(void)
+ {
+-	switch (board) {
+-	case oxp_x1:
+-	case oxp_g1_i:
+-	case oxp_g1_a:
+-	case oxp_fly:
+-		return true;
+-	default:
+-		break;
+-	}
+-	return false;
++	return profile->charge_limit_reg && profile->charge_inhibit_reg;
+ }
+ 
+ static int oxp_psy_ext_get_prop(struct power_supply *psy,
+@@ -542,7 +594,7 @@ static int oxp_psy_ext_get_prop(struct power_supply *psy,
+ 
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
+-		ret = read_from_ec(OXP_X1_CHARGE_LIMIT_REG, 1, &raw_val);
++		ret = read_from_ec(profile->charge_limit_reg, 1, &raw_val);
+ 		if (ret)
+ 			return ret;
+ 		if (raw_val < 0 || raw_val > 100)
+@@ -550,12 +602,14 @@ static int oxp_psy_ext_get_prop(struct power_supply *psy,
+ 		val->intval = raw_val;
+ 		return 0;
+ 	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
+-		ret = read_from_ec(OXP_X1_CHARGE_INHIBIT_REG, 1, &raw_val);
++		ret = read_from_ec(profile->charge_inhibit_reg, 1, &raw_val);
+ 		if (ret)
+ 			return ret;
+-		if ((raw_val & OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS) ==
+-		    OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS)
++		if ((raw_val & (profile->charge_inhibit_mask_awake |
++				profile->charge_inhibit_mask_off)) ==
++		    (profile->charge_inhibit_mask_awake |
++			     profile->charge_inhibit_mask_off))
+ 			val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE;
+-		else if ((raw_val & OXP_X1_CHARGE_INHIBIT_MASK_AWAKE) ==
+-			 OXP_X1_CHARGE_INHIBIT_MASK_AWAKE)
++		else if ((raw_val & profile->charge_inhibit_mask_awake) ==
++			 profile->charge_inhibit_mask_awake)
+ 			val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE_AWAKE;
+ 		else
+ 			val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO;
+@@ -577,7 +631,7 @@ static int oxp_psy_ext_set_prop(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
+ 		if (val->intval < 0 || val->intval > 100)
+ 			return -EINVAL;
+-		return write_to_ec(OXP_X1_CHARGE_LIMIT_REG, val->intval);
++		return write_to_ec(profile->charge_limit_reg, val->intval);
+ 	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
+ 		switch (val->intval) {
+ 		case POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO:
+@@ -585,17 +639,18 @@ static int oxp_psy_ext_set_prop(struct power_supply *psy,
+ 			break;
+ 		case POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE_AWAKE:
+-			raw_val = OXP_X1_CHARGE_INHIBIT_MASK_AWAKE;
++			raw_val = profile->charge_inhibit_mask_awake;
+ 			break;
+ 		case POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE:
+-			raw_val = OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS;
++			raw_val = profile->charge_inhibit_mask_awake |
++				  profile->charge_inhibit_mask_off;
+ 			break;
+ 		default:
+ 			return -EINVAL;
+ 		}
+ 
+-		return write_to_ec(OXP_X1_CHARGE_INHIBIT_REG, raw_val);
++		return write_to_ec(profile->charge_inhibit_reg, raw_val);
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -650,96 +705,41 @@ static struct acpi_battery_hook battery_hook = {
+ /* PWM enable/disable functions */
+ static int oxp_pwm_enable(void)
+ {
+-	switch (board) {
+-	case orange_pi_neo:
+-		return write_to_ec(ORANGEPI_SENSOR_PWM_ENABLE_REG, PWM_MODE_MANUAL);
+-	case aok_zoe_a1:
+-	case oxp_2:
+-	case oxp_fly:
+-	case oxp_mini_amd:
+-	case oxp_mini_amd_a07:
+-	case oxp_mini_amd_pro:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-	case oxp_g1_a:
+-		return write_to_ec(OXP_SENSOR_PWM_ENABLE_REG, PWM_MODE_MANUAL);
+-	default:
+-		return -EINVAL;
+-	}
++	return write_to_ec(profile->pwm_enable_reg, PWM_MODE_MANUAL);
+ }
+ 
+ static int oxp_pwm_disable(void)
+ {
+-	switch (board) {
+-	case orange_pi_neo:
+-		return write_to_ec(ORANGEPI_SENSOR_PWM_ENABLE_REG, PWM_MODE_AUTO);
+-	case aok_zoe_a1:
+-	case oxp_2:
+-	case oxp_fly:
+-	case oxp_mini_amd:
+-	case oxp_mini_amd_a07:
+-	case oxp_mini_amd_pro:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-	case oxp_g1_a:
+-		return write_to_ec(OXP_SENSOR_PWM_ENABLE_REG, PWM_MODE_AUTO);
+-	default:
+-		return -EINVAL;
+-	}
++	return write_to_ec(profile->pwm_enable_reg, PWM_MODE_AUTO);
+ }
+ 
+ static int oxp_pwm_read(long *val)
+ {
+-	switch (board) {
+-	case orange_pi_neo:
+-		return read_from_ec(ORANGEPI_SENSOR_PWM_ENABLE_REG, 1, val);
+-	case aok_zoe_a1:
+-	case oxp_2:
+-	case oxp_fly:
+-	case oxp_mini_amd:
+-	case oxp_mini_amd_a07:
+-	case oxp_mini_amd_pro:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-	case oxp_g1_a:
+-		return read_from_ec(OXP_SENSOR_PWM_ENABLE_REG, 1, val);
+-	default:
+-		return -EOPNOTSUPP;
+-	}
++	return read_from_ec(profile->pwm_enable_reg, 1, val);
+ }
+@@ -769,27 +769,7 @@ static umode_t oxp_ec_hwmon_is_visible(const void *drvdata,
+ /* Fan speed read function */
+ static int oxp_pwm_fan_speed(long *val)
+ {
+-	switch (board) {
+-	case orange_pi_neo:
+-		return read_from_ec(ORANGEPI_SENSOR_FAN_REG, 2, val);
+-	case oxp_2:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-		return read_from_ec(OXP_2_SENSOR_FAN_REG, 2, val);
+-	case aok_zoe_a1:
+-	case oxp_fly:
+-	case oxp_mini_amd:
+-	case oxp_mini_amd_a07:
+-	case oxp_mini_amd_pro:
+-	case oxp_g1_a:
+-		return read_from_ec(OXP_SENSOR_FAN_REG, 2, val);
+-	default:
+-		return -EOPNOTSUPP;
+-	}
++	return read_from_ec(profile->fan_reg, 2, val);
+ }
+ 
+ /* PWM input read/write functions */
+@@ -799,36 +779,15 @@ static int oxp_pwm_input_write(long val)
+ 	if (val < 0 || val > 255)
+ 		return -EINVAL;
+ 
+-	switch (board) {
+-	case orange_pi_neo:
+-		/* scale to range [1-244] */
+-		val = ((val - 1) * 243 / 254) + 1;
+-		return write_to_ec(ORANGEPI_SENSOR_PWM_REG, val);
+-	case oxp_2:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-		/* scale to range [0-184] */
+-		val = (val * 184) / 255;
+-		return write_to_ec(OXP_SENSOR_PWM_REG, val);
+-	case oxp_mini_amd:
+-	case oxp_mini_amd_a07:
+-		/* scale to range [0-100] */
+-		val = (val * 100) / 255;
+-		return write_to_ec(OXP_SENSOR_PWM_REG, val);
+-	case aok_zoe_a1:
+-	case oxp_fly:
+-	case oxp_mini_amd_pro:
+-	case oxp_g1_a:
+-		return write_to_ec(OXP_SENSOR_PWM_REG, val);
+-	default:
+-		return -EOPNOTSUPP;
+-	}
++	if (profile->pwm_min)
++		val = ((val - profile->pwm_min) *
++		       (profile->pwm_max - profile->pwm_min) /
++		       (255 - profile->pwm_min)) + profile->pwm_min;
++	else if (profile->pwm_max != 255)
++		val = (val * profile->pwm_max) / 255;
++
++	return write_to_ec(profile->pwm_reg, val);
+ }
+ 
+ static int oxp_pwm_input_read(long *val)
+@@ -836,49 +795,21 @@ static int oxp_pwm_input_read(long *val)
+ {
+ 	int ret;
+ 
+-	switch (board) {
+-	case orange_pi_neo:
+-		ret = read_from_ec(ORANGEPI_SENSOR_PWM_REG, 1, val);
+-		if (ret)
+-			return ret;
+-		/* scale from range [1-244] */
+-		*val = ((*val - 1) * 254 / 243) + 1;
+-		break;
+-	case oxp_2:
+-	case oxp_x1:
+-	case oxp_g1_i:
+-		ret = read_from_ec(OXP_SENSOR_PWM_REG, 1, val);
+-		if (ret)
+-			return ret;
+-		/* scale from range [0-184] */
+-		*val = (*val * 255) / 184;
+-		break;
+-	case oxp_mini_amd:
+-	case oxp_mini_amd_a07:
+-		ret = read_from_ec(OXP_SENSOR_PWM_REG, 1, val);
+-		if (ret)
+-			return ret;
+-		/* scale from range [0-100] */
+-		*val = (*val * 255) / 100;
+-		break;
+-	case aok_zoe_a1:
+-	case oxp_fly:
+-	case oxp_mini_amd_pro:
+-	case oxp_g1_a:
+-	default:
+-		ret = read_from_ec(OXP_SENSOR_PWM_REG, 1, val);
+-		if (ret)
+-			return ret;
+-		break;
+-	}
++	ret = read_from_ec(profile->pwm_reg, 1, val);
++	if (ret)
++		return ret;
++
++	if (profile->pwm_min)
++		*val = ((*val - profile->pwm_min) *
++			(255 - profile->pwm_min) /
++			(profile->pwm_max - profile->pwm_min)) +
++		       profile->pwm_min;
++	else if (profile->pwm_max != 255)
++		*val = (*val * 255) / profile->pwm_max;
++
+ 	return 0;
+ }
+@@ -978,13 +909,14 @@ static int __init oxp_platform_init(void)
+ 		return -ENODEV;
+ 
+ 	board = (enum oxp_board)(unsigned long)dmi_entry->driver_data;
++	profile = &oxp_ec_profiles[board];
+ 
+ 	/*
+ 	 * Have to check for AMD processor here because DMI strings are the same
+ 	 * between Intel and AMD boards on older OneXPlayer devices, the only way
+ 	 * to tell them apart is the CPU. Old Intel boards have an unsupported EC.
+ 	 */
+-	if (board == oxp_mini_amd && boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
++	if (profile->amd_only && boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
+ 		return -ENODEV;
+ 
+ 	oxp_platform_device =
+-- 
+2.51.0
