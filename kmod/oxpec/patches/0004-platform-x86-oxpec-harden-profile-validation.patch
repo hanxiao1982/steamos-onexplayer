@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Xiao Han <hanxiao@live.com>
+Date: Fri, 4 Sep 2026 03:25:00 +0800
+Subject: [PATCH 4/4] platform/x86: oxpec: Harden EC profile validation
+
+Make optional feature presence depend on register availability rather than
+requiring every associated value to be non-zero. This keeps zero-valued
+LED states representable while still rejecting incomplete profiles.
+
+Validate LED state values and charge masks semantically, report validation
+failures in the kernel log, remove the now-unused combined charge mask, and
+avoid shadowing the global profile pointer in the validator.
+
+Signed-off-by: Xiao Han <hanxiao@live.com>
+---
+ drivers/platform/x86/oxpec.c | 57 +++++++++++++++++++++++++++++--------
+ 1 file changed, 45 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
+--- a/drivers/platform/x86/oxpec.c
++++ b/drivers/platform/x86/oxpec.c
+@@ -104,8 +104,6 @@ static struct device *oxp_dev;
+ #define OXP_X1_CHARGE_INHIBIT_MASK_AWAKE	0x01
+ /* X1 Mask is 0x0A, F1Pro is 0x02 but the extra bit on the X1 does nothing. */
+ #define OXP_X1_CHARGE_INHIBIT_MASK_OFF		0x02
+-#define OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS	(OXP_X1_CHARGE_INHIBIT_MASK_AWAKE | \
+-						 OXP_X1_CHARGE_INHIBIT_MASK_OFF)
+ 
+ static const struct oxp_ec_profile aok_zoe_a1 = {
+ 	.fan_reg = OXP_SENSOR_FAN_REG,
+@@ -230,28 +228,63 @@ static const struct oxp_ec_profile oxp_g1_a = {
+ 	.charge_inhibit_mask_off = OXP_X1_CHARGE_INHIBIT_MASK_OFF,
+ };
+ 
+-static bool oxp_ec_profile_valid(const struct oxp_ec_profile *profile)
++static bool oxp_ec_profile_valid(const struct oxp_ec_profile *p)
+ {
+-	if (!profile || !profile->fan_reg || !profile->pwm_enable_reg ||
+-	    !profile->pwm_reg || !profile->pwm_max)
++	if (!p) {
++		pr_err("oxpec: missing EC profile\n");
+ 		return false;
++	}
+ 
+-	if (profile->pwm_min >= profile->pwm_max)
++	if (!p->fan_reg || !p->pwm_enable_reg || !p->pwm_reg) {
++		pr_err("oxpec: incomplete fan/PWM register profile\n");
+ 		return false;
++	}
+ 
+-	if (!!profile->turbo_reg != !!profile->turbo_mask)
++	if (p->pwm_min >= p->pwm_max) {
++		pr_err("oxpec: invalid PWM range %u..%u\n",
++		       p->pwm_min, p->pwm_max);
+ 		return false;
++	}
+ 
+-	if (!!profile->turbo_led_reg != !!profile->turbo_led_off ||
+-	    !!profile->turbo_led_reg != !!profile->turbo_led_on)
++	if (!!p->turbo_reg != !!p->turbo_mask) {
++		pr_err("oxpec: incomplete turbo profile\n");
+ 		return false;
++	}
+ 
+-	if (!!profile->charge_limit_reg != !!profile->charge_inhibit_reg ||
+-	    !!profile->charge_inhibit_reg != !!profile->charge_inhibit_mask_awake ||
+-	    !!profile->charge_inhibit_reg != !!profile->charge_inhibit_mask_off)
++	if (!p->turbo_led_reg) {
++		if (p->turbo_led_off || p->turbo_led_on) {
++			pr_err("oxpec: LED values set without an LED register\n");
++			return false;
++		}
++	} else if (p->turbo_led_off == p->turbo_led_on) {
++		pr_err("oxpec: turbo LED on/off values are identical\n");
++		return false;
++	}
++
++	if (!!p->charge_limit_reg != !!p->charge_inhibit_reg) {
++		pr_err("oxpec: incomplete charge register profile\n");
++		return false;
++	}
++
++	if (!p->charge_inhibit_reg) {
++		if (p->charge_inhibit_mask_awake || p->charge_inhibit_mask_off) {
++			pr_err("oxpec: charge masks set without charge registers\n");
++			return false;
++		}
++	} else if (!p->charge_inhibit_mask_awake ||
++		   !p->charge_inhibit_mask_off ||
++		   (p->charge_inhibit_mask_awake & p->charge_inhibit_mask_off)) {
++		pr_err("oxpec: invalid charge inhibit masks %#x/%#x\n",
++		       p->charge_inhibit_mask_awake,
++		       p->charge_inhibit_mask_off);
+ 		return false;
++	}
+ 
+ 	return true;
+ }
+-- 
+2.51.0
