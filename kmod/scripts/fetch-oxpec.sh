@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEST="${ROOT}/kmod/oxpec/oxpec.c"
+STATE="${ROOT}/kmod/oxpec/.applied-patches"
 SRC="${1:-mainline}"
 
 case "$SRC" in
@@ -24,4 +25,5 @@ esac
 
 echo "Fetching ${SRC} -> ${DEST}"
 curl -fsSL -o "${DEST}" "${URL}"
+rm -f "${STATE}"
 wc -l "${DEST}"
