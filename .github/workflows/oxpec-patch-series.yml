@@ -6,12 +6,16 @@ on:
       - oxpec/profile-refactor
     paths:
       - 'kmod/oxpec/patches/**'
+      - 'kmod/oxpec/tests/**'
       - 'kmod/scripts/apply-oxpec-patches.sh'
+      - 'kmod/scripts/fetch-oxpec.sh'
       - '.github/workflows/oxpec-patch-series.yml'
   pull_request:
     paths:
       - 'kmod/oxpec/patches/**'
+      - 'kmod/oxpec/tests/**'
       - 'kmod/scripts/apply-oxpec-patches.sh'
+      - 'kmod/scripts/fetch-oxpec.sh'
       - '.github/workflows/oxpec-patch-series.yml'
 
 jobs:
@@ -33,17 +37,27 @@ jobs:
             echo "mainline oxpec.c moved: expected ${expected}, got ${actual}" >&2
             exit 1
           fi
+          rm -f kmod/oxpec/.applied-patches
 
       - name: Apply through patch 1
         run: bash kmod/scripts/apply-oxpec-patches.sh 1
 
-      - name: Check patch 1 state
+      - name: Check patch 1 structure
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'struct oxp_ec_profile' kmod/oxpec/oxpec.c
+          grep -q 'profile = dmi_entry->driver_data' kmod/oxpec/oxpec.c
+          grep -q 'oxp_ec_profile_valid' kmod/oxpec/oxpec.c
+          ! grep -q 'enum oxp_board' kmod/oxpec/oxpec.c
+          ! grep -q 'oxp_ec_profiles\[' kmod/oxpec/oxpec.c
+          ! grep -q 'switch (board)' kmod/oxpec/oxpec.c
+          ! grep -Eq '\.driver_data = \(void \*\)[a-z0-9_]+,' kmod/oxpec/oxpec.c
           ! grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
           ! grep -q 'oxp_apex' kmod/oxpec/oxpec.c
+
+      - name: Mock patch 1 behavior against pre-refactor switches
+        run: python3 kmod/oxpec/tests/profile-refactor-mock.py kmod/oxpec/oxpec.c
 
       - name: Continue through patch 2
         run: bash kmod/scripts/apply-oxpec-patches.sh 2
@@ -52,7 +66,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
+          grep -q 'static const struct oxp_ec_profile oxp_2_ga18' kmod/oxpec/oxpec.c
+          grep -q 'DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 GA18")' kmod/oxpec/oxpec.c
+          grep -q 'DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER 2 GA72-R")' kmod/oxpec/oxpec.c
           ! grep -q 'oxp_apex' kmod/oxpec/oxpec.c
 
       - name: Continue through patch 3
@@ -62,7 +78,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
-          grep -q 'oxp_apex' kmod/oxpec/oxpec.c
+          grep -q 'static const struct oxp_ec_profile oxp_apex' kmod/oxpec/oxpec.c
           grep -Eq '#define[[:space:]]+OXP_APEX_CHARGE_LIMIT_REG[[:space:]]+0xE5' kmod/oxpec/oxpec.c
           grep -Eq '#define[[:space:]]+OXP_APEX_CHARGE_INHIBIT_REG[[:space:]]+0xE6' kmod/oxpec/oxpec.c
+          grep -A4 'DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX")' kmod/oxpec/oxpec.c | grep -q '&oxp_apex'
+          grep -A4 'DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO")' kmod/oxpec/oxpec.c | grep -q '&oxp_apex'
