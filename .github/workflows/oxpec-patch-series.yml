@@ -1,0 +1,46 @@
+name: oxpec patch series
+
+on:
+  push:
+    branches:
+      - oxpec/profile-refactor
+    paths:
+      - 'kmod/oxpec/patches/**'
+      - 'kmod/scripts/apply-oxpec-patches.sh'
+      - '.github/workflows/oxpec-patch-series.yml'
+  pull_request:
+    paths:
+      - 'kmod/oxpec/patches/**'
+      - 'kmod/scripts/apply-oxpec-patches.sh'
+      - '.github/workflows/oxpec-patch-series.yml'
+
+jobs:
+  apply-series:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch pinned mainline oxpec baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            https://raw.githubusercontent.com/torvalds/linux/master/drivers/platform/x86/oxpec.c \
+            -o kmod/oxpec/oxpec.c
+          actual="$(git hash-object kmod/oxpec/oxpec.c)"
+          expected="34bb17fca14813669b14c8e833a87a8a85e3bd17"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "mainline oxpec.c moved: expected ${expected}, got ${actual}" >&2
+            exit 1
+          fi
+
+      - name: Apply patch series
+        run: bash kmod/scripts/apply-oxpec-patches.sh
+
+      - name: Check resulting profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'oxp_2_ga18' kmod/oxpec/oxpec.c
+          grep -q 'oxp_apex' kmod/oxpec/oxpec.c
+          grep -q 'charge_limit_reg = 0xE5' kmod/oxpec/oxpec.c
