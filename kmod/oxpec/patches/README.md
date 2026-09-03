@@ -14,6 +14,7 @@ The patches are ordered by [`series`](series):
 1. `0001-platform-x86-oxpec-use-data-driven-profiles.patch` — structural refactor only for currently supported boards. DMI entries point directly at immutable `struct oxp_ec_profile` objects, profile invariants are validated once during init, and the existing board-specific switch behavior is replaced by profile fields without changing the supported-board register/scaling behavior.
 2. `0002-platform-x86-oxpec-split-onexplayer-2-profiles.patch` — vendor-profile correction for OXP2 ARP23/ARP23P (PWM 184) vs GA18/GA72-R (PWM 255), with exact DMI strings.
 3. `0003-platform-x86-oxpec-add-apex-profile.patch` — vendor-profile correction for APEX/X2 Mini PRO charge registers E5/E6.
+4. `0004-platform-x86-oxpec-harden-profile-validation.patch` — review follow-up for profile validation. Optional feature presence is keyed by registers instead of non-zero state values; LED on/off values must differ; charge masks must be non-zero and disjoint when charge support exists; invalid profiles are logged; the obsolete combined charge-mask macro and validator shadowing/redundancy are removed.
 
 Local workflow:
 
@@ -40,12 +41,16 @@ kmod/scripts/build.sh oxpec
 # Continue through patch 3.
 bash kmod/scripts/apply-oxpec-patches.sh 3
 kmod/scripts/build.sh oxpec
+
+# Continue through the review-validation fix.
+bash kmod/scripts/apply-oxpec-patches.sh 4
+kmod/scripts/build.sh oxpec
 ```
 
 With no argument, or with `all`, the script applies the full series. Valid numeric values are `1` through the current number of entries in `series`. The runner records successfully applied patch names in the ignored `kmod/oxpec/.applied-patches` state file so the same fetched source can be advanced incrementally even when later patches modify context that was introduced by earlier patches. `fetch-oxpec.sh` removes this state file whenever it downloads a fresh source.
 
-The patch-1 mock parses the actual profile objects from the patched `oxpec.c` and compares their fan/PWM/turbo/LED/charge behavior against the pre-refactor switch logic over exhaustive byte/PWM domains. CI also verifies that the old `enum oxp_board`, profile-index array and `switch (board)` dispatch are gone, and that incomplete profiles are rejected by the init-time validator before EC helpers can use them.
+The patch-1 mock parses the actual profile objects from the patched `oxpec.c` and compares their fan/PWM/turbo/LED/charge behavior against the pre-refactor switch logic over exhaustive byte/PWM domains. CI also verifies that the old `enum oxp_board`, profile-index array and `switch (board)` dispatch are gone, and that incomplete profiles are rejected by the init-time validator before EC helpers can use them. The final-series CI additionally checks the review hardening: zero-valued LED states remain representable because presence is keyed by the LED register, LED states cannot be identical, charge masks are non-zero and disjoint, validation errors are logged, and the obsolete combined-mask macro is gone.
 
 `fetch-oxpec.sh` deliberately remains a clean-source fetcher. Patch application is explicit so an unmodified upstream source and each intermediate patch state can be reviewed independently.
 
-For upstream submission, the patch files are generated with `git format-patch` against the kernel path `drivers/platform/x86/oxpec.c`; the local runner strips that prefix when applying them to the ignored `kmod/oxpec/oxpec.c` test copy.
+For upstream submission, the patch files are generated with `git format-patch` against the kernel path `drivers/platform/x86/oxpec.c`; the local runner strips that prefix when applying them to the ignored `kmod/oxpec/oxpec.c` test copy. Patch 4 is a review fixup and should be folded into patch 1 before sending the series upstream.
