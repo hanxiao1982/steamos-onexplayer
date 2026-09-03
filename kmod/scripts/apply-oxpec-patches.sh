@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OXP_DIR="${ROOT}/kmod/oxpec"
 SERIES="${OXP_DIR}/patches/series"
 SOURCE="${OXP_DIR}/oxpec.c"
+STATE="${OXP_DIR}/.applied-patches"
 LIMIT="${1:-all}"
 
 usage() {
@@ -62,6 +63,8 @@ apply_args=(
   --directory=kmod/oxpec
 )
 
+touch "${STATE}"
+
 for ((i = 0; i < STOP; i++)); do
   patch_name="${PATCHES[$i]}"
   patch_file="${OXP_DIR}/patches/${patch_name}"
@@ -73,11 +76,19 @@ for ((i = 0; i < STOP; i++)); do
 
   printf 'Patch %d/%d: %s\n' "$((i + 1))" "${TOTAL}" "${patch_name}"
 
-  # Allow incremental testing on the same fetched source: after testing patch 1,
-  # running this script with "2" skips patch 1 and applies patch 2.
+  if grep -Fxq "${patch_name}" "${STATE}"; then
+    echo "  already applied; skipping"
+    continue
+  fi
+
+  # Backward-compatible detection for a source patched before the state file
+  # existed. This only needs to recognize the immediately current patch;
+  # once recognized it is recorded so later patches can modify overlapping
+  # context without breaking staged re-entry.
   if git -C "${ROOT}" apply "${apply_args[@]}" --reverse --check "${patch_file}" \
       >/dev/null 2>&1; then
-    echo "  already applied; skipping"
+    echo "  already applied; recording state"
+    printf '%s\n' "${patch_name}" >> "${STATE}"
     continue
   fi
 
@@ -85,10 +96,8 @@ for ((i = 0; i < STOP; i++)); do
   # drivers/platform/x86/oxpec.c, while the fetched test source lives at
   # kmod/oxpec/oxpec.c. -p4 removes a/drivers/platform/x86/ and --directory
   # redirects the result to the local out-of-tree test directory.
-  #
-  # --recount derives hunk sizes from the actual patch body while retaining
-  # normal context validation.
   git -C "${ROOT}" apply "${apply_args[@]}" --verbose "${patch_file}"
+  printf '%s\n' "${patch_name}" >> "${STATE}"
 done
 
 if (( STOP < TOTAL )); then
