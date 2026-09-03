@@ -74,7 +74,7 @@ jobs:
       - name: Continue through patch 3
         run: bash kmod/scripts/apply-oxpec-patches.sh 3
 
-      - name: Check final profile state
+      - name: Check patch 3 profile state
         shell: bash
         run: |
           set -euo pipefail
@@ -83,3 +83,19 @@ jobs:
           grep -Eq '#define[[:space:]]+OXP_APEX_CHARGE_INHIBIT_REG[[:space:]]+0xE6' kmod/oxpec/oxpec.c
           grep -A4 'DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX")' kmod/oxpec/oxpec.c | grep -q '&oxp_apex'
           grep -A4 'DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO")' kmod/oxpec/oxpec.c | grep -q '&oxp_apex'
+
+      - name: Continue through patch 4
+        run: bash kmod/scripts/apply-oxpec-patches.sh 4
+
+      - name: Check profile validation review fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'oxp_ec_profile_valid(const struct oxp_ec_profile \*p)' kmod/oxpec/oxpec.c
+          grep -q 'p->turbo_led_off == p->turbo_led_on' kmod/oxpec/oxpec.c
+          grep -q 'p->charge_inhibit_mask_awake & p->charge_inhibit_mask_off' kmod/oxpec/oxpec.c
+          grep -q 'pr_err("oxpec: incomplete fan/PWM register profile' kmod/oxpec/oxpec.c
+          grep -q 'pr_err("oxpec: turbo LED on/off values are identical' kmod/oxpec/oxpec.c
+          grep -q 'pr_err("oxpec: invalid charge inhibit masks' kmod/oxpec/oxpec.c
+          ! grep -q 'OXP_X1_CHARGE_INHIBIT_MASK_ALWAYS' kmod/oxpec/oxpec.c
+          ! grep -q '!p->pwm_max' kmod/oxpec/oxpec.c
