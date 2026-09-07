@@ -9,8 +9,9 @@ EC RAM through ACPI-WMI, not through the ACPI Embedded Controller address
 space that ``oxpec`` uses on AMD boards.
 
 This driver is the Linux client for that interface. It uses a driver mutex
-like ``msi-wmi-platform``, but calls ACPI method ``WMAC`` with Integer Arg2
-(Windows CIM). ``wmidev_evaluate_method`` Buffer Arg2 is fallback only.
+like ``msi-wmi-platform`` and invokes the firmware through the WMI core.
+Windows CIM exposes the method input as a MOF ``UInt32``; ACPI-WMI marshals
+that value into the four-byte little-endian Buffer consumed by ``WMAC``.
 The GUID and method table are not MSI's.
 
 WMI interface
@@ -19,12 +20,22 @@ WMI interface
 GUID ``43B5A593-AD62-4257-8546-91B0797BEC1B``
 Windows class ``SuRwECRegInterface`` (``root\\WMI``)
 
-========  ============  ==========================================
-Method    WmiMethodId   Input (ACPI Integer / UInt32)
-========  ============  ==========================================
-ReadECReg     1         ``0x04 | (reg << 8)``
-WriteECReg    2         ``0x04 | (reg << 8) | (val << 16)``
-========  ============  ==========================================
+.. list-table::
+   :header-rows: 1
+
+   * - Method
+     - WmiMethodId
+     - MOF UInt32 / little-endian method-buffer bytes
+   * - ReadECReg
+     - 1
+     - ``0x04 | (reg << 8)`` / ``04 reg 00 00``
+   * - WriteECReg
+     - 2
+     - ``0x04 | (reg << 8) | (val << 16)`` / ``04 reg val 00``
+
+Passing an ACPI Integer directly also happens to work because AML
+``CreateByteField`` triggers an implicit Integer-to-Buffer conversion. It is
+not the ACPI-WMI ABI used by this driver.
 
 WriteECReg (method 2) is the apply. WriteReadECReg (method 3) is not
 required. Output is STRING ``"0x00,0xNN,..."``. Byte 0 is status

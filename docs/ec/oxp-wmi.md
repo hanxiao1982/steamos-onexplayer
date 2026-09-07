@@ -87,9 +87,19 @@ write 0x4A = 1  -> 0x00014A04
 write 0x4B =184 -> 0x00B84B04
 ```
 
-Do not pass OneXConsole's display/storage form `0x400 + reg` directly as the ACPI Integer. For X2 Mini, `0x458` is rejected because AML interprets the bytes in the opposite order.
+## Packing and Arg2 type
 
-`uStringReturn` on a successful single-byte read:
+Keep the layers distinct:
+
+| Layer | Type | Example for `0x4A=1` |
+|---|---|---|
+| OneXConsole / Windows CIM | MOF `uint32` | `0x00014A04` |
+| ACPI-WMI method input | four-byte Buffer | `04 4A 01 00` |
+| `WMAC` fields | three byte fields | group `04`, offset `4A`, data `01` |
+
+The driver passes that four-byte Buffer through `wmidev_evaluate_method()`. A direct `ACPI_TYPE_INTEGER` call produces the same first bytes only because ACPICA implicitly converts the Integer to a little-endian Buffer for AML `CreateByteField`; relying on that conversion is unnecessary.
+
+Method **2 (`WriteECReg`) is the apply**; method 3 (`WriteReadECReg`) is not required.
 
 ```
 byte 0 = 0x00   success
@@ -103,7 +113,11 @@ byte 2..7 = 0
 
 `ONEXPLAYER X2Mini` is the type-2 SKU with the strongest live validation so far.
 
-Confirmed on Windows WMI and Linux `oxp-wmi`:
+```
+# write 1-byte register number, then read 8-byte last output
+printf '\x70' | sudo tee /sys/kernel/debug/oxp-wmi-*/read_ec >/dev/null
+sudo hexdump -C /sys/kernel/debug/oxp-wmi-*/read_ec | head
+sudo cat /sys/kernel/debug/oxp-wmi-*/last_info   # wmi method=1 input=u32-le:…
 
 - `0x4A`: `0` auto / `1` manual.
 - `0x4B`: raw PWM scale 0–184; OneXConsole percent is `raw * 100 / 184`.
@@ -156,7 +170,42 @@ Do not grow `oxp-wmi` into those unrelated subsystems solely because OneXConsole
 
 ## Validation status
 
-- Seven-device type-2 allowlist and register profile: **confirmed directly from OneXConsole 0.10.2-fix8**.
-- WMI class/GUID/methods/Integer packing: **confirmed from CompatLayerCT/firmware and X2 Mini tests**.
-- X2 Mini fan/temp/charge behavior: **live verified**.
-- Other six type-2 products: register/profile selection is source-confirmed; live hardware validation is still desirable.
+Status byte `0x00` = ok, `0xFF` = fail (inverted vs `msi-wmi-platform`).
+
+## V5.04 firmware evidence
+
+`X2Mini-GE3-NewBIOS-V5.04-WinFlash(FixTheScreenDisplay).zip` contains a
+32 MiB SPI image. Its 222,851-byte DSDT defines:
+
+```text
+PNP0C14 _UID "RWECREGWMI"
+GUID      43B5A593-AD62-4257-8546-91B0797BEC1B
+object_id "AC" -> WMAC
+instances 1
+flags     0x02 (WMI method)
+```
+
+The embedded BMOF declares `ReadECReg`, `WriteECReg`, and `WriteReadECReg`
+with MOF `uint32` inputs. `WMAC` is `NotSerialized` (the byte-access helpers it
+calls are `Serialized`), so the Linux driver serializes complete WMI calls with
+a mutex. `WMAC` then does:
+
+```asl
+CreateByteField (Arg2, 0, GRPN)
+CreateByteField (Arg2, 1, OFFR)
+CreateByteField (Arg2, 2, WTDT)
+```
+
+It accesses one byte at `0xFE0B0000 + GRPN * 0x100 + OFFR` through a
+`SystemMemory` OperationRegion. This is a firmware-defined memory-mapped EC
+window, not an `EmbeddedControl` OperationRegion.
+
+ACPICA `acpiexec` runs against the extracted DSDT returned identical results
+for Integer `0x5804` and Buffer `{ 0x04, 0x58, 0x00, 0x00 }`. That proves the
+Integer path is compatibility through implicit conversion, while the Buffer
+path is the native ACPI-WMI ABI. No extracted SSDT contains a second `WMAC` or
+overrides this device.
+
+Although the BMOF describes method 3 as returning multiple registers, the
+V5.04 AML writes one byte and reads the same offset back; the remaining output
+bytes are zero. The driver therefore continues to use method 2 for writes.
