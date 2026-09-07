@@ -1,51 +1,46 @@
-# OneXPlayer EC register maps
+# OneXPlayer EC documentation
 
-Research notes from official **OneXConsole 0.10.2-fix8** (download API `https://app.onexconsole.com/web/agg/app:download`).
+Source of truth: official OneXConsole **0.10.2-fix8** (`background.js` plus the vendor `CompatLayerCT.exe` backend), cross-checked with live X2 Mini WMI tests where noted.
 
-Installer and unpacked binaries are **not** in this repo.
+The vendor backend exposes exactly two EC access types:
 
-Manufacturer match: `Manufacturer` contains `ONE-NETBOOK`.
+| OneXConsole | Value | Windows implementation | Linux ownership in this repo |
+|---|---:|---|---|
+| `ECAccessType.WinRing0` | 1 | Direct EC I/O through WinRing0 | [`oxpec`](oxpec.md) |
+| `ECAccessType.OxpWMI` | 2 | `SuRwECRegInterface` WMI | [`oxp-wmi`](oxp-wmi.md) |
 
-## Platforms
+`WinRing0` is only the Windows mechanism; it is **not** a Linux abstraction or driver name. Linux `oxpec` uses the kernel ACPI EC path and should remain independent of WMI. `oxp-wmi` implements only the type-2 firmware protocol.
 
-Two EC maps in this generation. Products that share a map are listed together.
+OneXConsole chooses one access type globally after DMI detection and then uses that backend for its EC services. In this build the device sets are disjoint: no product is assigned both types.
 
-| Platform | Products (DMI `Product`) | Access | Fan RPM | Turbo | PWM | Charge | Doc |
-|---|---|---|---|---|---|---|---|
-| Intel Arc G3 Extreme | `ONEXPLAYER X2Mini`, `ONEXPLAYER X2`, `ONEXPLAYER X2 EVA`, `ONEXPLAYER 3`, `ONEXPLAYER Apex Air`, `ONEXPLAYER Apex i` | OxpWMI (`ecAccessType=2`) | `0x58`/`0x59` | — (`0xEB` unused) | `0x4A`/`0x4B`, 0–184 | `0xA3`/`0xA4` | [x2-mini.md](x2-mini.md) |
-| AMD (Strix Halo / Fly) | `ONEXPLAYER X2Mini PRO`, `ONEXPLAYER APEX` | WinRing0 (`ecAccessType=1`) | `0x76`/`0x77` | `0xF1` | `0x4A`/`0x4B`, 0–255 | `0xE5`/`0xE6`/`0xE7` | [x2-mini-pro.md](x2-mini-pro.md) |
+## Driver ownership rule
 
-**X2 Mini live is complete** for the EC subset SteamOS needs: [x2-mini.md](x2-mini.md). Use fan `0x4A`/`0x4B`/`0x58`/`0x59`, charge `0xA3`/`0xA4`, CPU temp `0x70`, optional `0xE3`. Ignore `0x2D`, `0x60`/`0x61`, `0xA0`–`0xA2`, `0xA5`, `0xEB` (stuck at 66 / `0x42`), `0xED` (always 0). TDP is Intel RAPL (`TdpLimit1` remote), not EC — [tdp.md](tdp.md). CPU turbo/clock is host power policy. RGB/rumble/gyro is HID.
+1. Match the exact DMI `Board Product` used by OneXConsole.
+2. Map it to the vendor access type.
+3. Load only the corresponding Linux module.
 
-**X2 Mini PRO** is source-mapped only (no live reads): [x2-mini-pro.md](x2-mini-pro.md). WinRing0, fan `0x76`/`0x77` PWM 0–255, charge **`0xE5`/`0xE6`/`0xE7`**, turbo addr `0xF1`. Linux `oxpec` `oxp_fly` still uses charge `0xA3`/`0xA4` — that is a mismatch to fix after live check.
+Do **not** decide that a machine belongs to `oxp-wmi` merely because `SuRwECRegInterface` exists. Some type-1 firmware also exposes that WMI provider while OneXConsole deliberately selects the direct EC backend.
 
-## How OneXConsole talks to the EC
+Both modules should keep runtime DMI checks so explicitly loading the wrong module fails with `-ENODEV` rather than creating two EC owners.
 
-See [access.md](access.md) for the two backends and the Linux `oxpec` comparison. Intel G3E WMI vs in-tree MSI Claw (`msi-wmi-platform`): [linux-wmi.md](linux-wmi.md). Local HTTP/pipe API (port **1013**): [onexconsole-api.md](onexconsole-api.md).
+## Canonical documents
 
-Short version:
+- [oxpec.md](oxpec.md) — all type-1 exact DMI strings, register profiles and known profile differences.
+- [oxp-wmi.md](oxp-wmi.md) — all type-2 exact DMI strings, shared WMI profile, transport ABI and X2 Mini live validation.
+- [onexconsole-api.md](onexconsole-api.md) — retained OneXConsole/CompatLayerCT reverse-engineering and local API details for future refactors.
+- [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md) — raw CompatLayerCT WCF route inventory; kept as reverse-engineering reference.
+- [tdp.md](tdp.md) — Intel/SteamOS TDP work; intentionally separate because TDP is not an EC register control on the validated X2 Mini.
 
-1. Electron app (`background.js`) selects the per-model address table and POSTs to CompatLayerCT (`http://localhost:1013` or named pipe `\\.\pipe\CompatLayerCT`).
-2. `CompatLayerCT.exe` performs the read/write.
-3. Backends:
-   - **1 = WinRing0** (AMD): `ReadIoPortByte` / `WriteIoPortByte` on 0x66/0x62
-   - **2 = OxpWMI** (Intel G3E): WMI `SuRwECRegInterface` (`ReadECReg` / `WriteECReg`)
-4. App addresses are `0x400 + ec_reg`. WinRing0 uses the low 8 bits. OxpWMI CIM/Linux packing is `0x04 | (reg << 8)` (JS `0x400+reg` is rejected).
+The former per-feature/per-model EC notes (`access.md`, `fan.md`, `charge.md`, `x2-mini*.md`, `linux-wmi.md`, `ui-vs-ec.md`, `maps.yaml`) were consolidated into the two driver documents above to avoid duplicated or conflicting register tables.
 
-Fan RPM is 16-bit big-endian (first register is the high byte), same as Linux `oxpec`.
+## Important matching lessons from OneXConsole
 
-## Files
+Broad family matching is unsafe. Examples from the vendor application:
 
-- [x2-mini.md](x2-mini.md) — Intel G3E map + X2 Mini live vs OneXConsole
-- [x2-mini-pro.md](x2-mini-pro.md) — AMD map, source-only (live later)
-- [access.md](access.md) — WinRing0 vs OxpWMI vs Linux oxpec
-- [onexconsole-api.md](onexconsole-api.md) — localhost:1013 / named-pipe routes (F12 / proxy)
-- [compatlayerct-uritemplates.md](compatlayerct-uritemplates.md) — full WCF UriTemplate scan of CompatLayerCT.exe 0.10.2-fix8
-- [linux-wmi.md](linux-wmi.md) — kernel WMI files and MSI Claw G3E comparison
-- [oxp-wmi.md](oxp-wmi.md) — Linux `oxp-wmi` module (OneXPlayer Intel / OxpWMI)
-- [tdp.md](tdp.md) — Steam `TdpLimit1` / Intel RAPL (not EC)
-- [../../linux/oxp-wmi/](../../linux/oxp-wmi/) — driver sources
-- [maps.yaml](maps.yaml) — machine-readable tables
-- [charge.md](charge.md) — charge-limit / bypass / force-min ranges and read-only probe
-- [fan.md](fan.md) — fan PWM / RPM (X2 Mini; Linux `oxp-wmi` writes live)
-- [ui-vs-ec.md](ui-vs-ec.md) — which OneXConsole controls are EC vs MSR/HID
+- `ONEXPLAYER 2 ARP23` uses PWM max 184, while `ONEXPLAYER 2 GA18` and `ONEXPLAYER 2 GA72-R` use 255.
+- `ONEXPLAYER X2Mini` is type 2/WMI (`EB`, RPM `58/59`, PWM 184, charge `A3/A4/A5`), while `ONEXPLAYER X2Mini PRO` is type 1/direct EC (`F1`, RPM `76/77`, PWM 255, charge `E5/E6/E7`).
+- `ONEXPLAYER APEX` is type 1, while `ONEXPLAYER Apex i` and `ONEXPLAYER Apex Air` are type 2.
+- `ONEXPLAYER G1 A` and `ONEXPLAYER G1 i` use different register families.
+- `ONEXPLAYER SUPER X` is type 1, while `ONEXPLAYER SUPER V` is type 2.
+
+Prefer `DMI_EXACT_MATCH(DMI_BOARD_NAME, ...)` and attach a concrete register profile rather than using product-prefix matching.
