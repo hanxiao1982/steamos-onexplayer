@@ -25,6 +25,8 @@ Both modules should keep runtime DMI checks so explicitly loading the wrong modu
 
 ## Canonical documents
 
+- [onexconsole-reverse-engineering.md](onexconsole-reverse-engineering.md) — vendor-package reverse engineering: access enum, backend transport, exact board products, register initialization and implementation cautions.
+- [onexconsole-dmi-ec-profiles.md](onexconsole-dmi-ec-profiles.md) — Linux-oriented DMI/profile matrix with the full `board_vendor` / `board_name` / `sys_vendor` / `product_name` four-tuple and an explicit evidence status for system-level DMI values.
 - [oxpec.md](oxpec.md) — all type-1 exact DMI strings, register profiles and known profile differences.
 - [oxp-wmi.md](oxp-wmi.md) — all type-2 exact DMI strings, shared WMI profile, transport ABI and X2 Mini live validation.
 - [onexconsole-api.md](onexconsole-api.md) — retained OneXConsole/CompatLayerCT reverse-engineering and local API details for future refactors.
